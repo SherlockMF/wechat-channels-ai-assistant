@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import type { VideoAsset } from "@video-diagnosis/shared-types";
@@ -146,4 +148,70 @@ export function verifyAssetSignature(
   const left = Buffer.from(signature);
   const right = Buffer.from(expected);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+export async function servePrivateVideo(
+  request: Request,
+  asset: VideoAsset,
+): Promise<Response> {
+  try {
+    const stat = await fs.stat(asset.storagePath);
+    const rangeHeader = request.headers.get("range");
+    const commonHeaders = {
+      "Content-Type": asset.mimeType,
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "private, max-age=60",
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(
+        asset.originalFilename,
+      )}`,
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/u.exec(rangeHeader.trim());
+      if (!match) {
+        return new Response(null, {
+          status: 416,
+          headers: { ...commonHeaders, "Content-Range": `bytes */${stat.size}` },
+        });
+      }
+      const requestedStart = match[1] ? Number(match[1]) : null;
+      const requestedEnd = match[2] ? Number(match[2]) : null;
+      const start = requestedStart ?? Math.max(0, stat.size - (requestedEnd ?? 0));
+      const end = Math.min(requestedEnd ?? stat.size - 1, stat.size - 1);
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start < 0 ||
+        end < start ||
+        start >= stat.size
+      ) {
+        return new Response(null, {
+          status: 416,
+          headers: { ...commonHeaders, "Content-Range": `bytes */${stat.size}` },
+        });
+      }
+      const stream = Readable.toWeb(
+        createReadStream(asset.storagePath, { start, end }),
+      ) as ReadableStream;
+      return new Response(stream, {
+        status: 206,
+        headers: {
+          ...commonHeaders,
+          "Content-Length": String(end - start + 1),
+          "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+        },
+      });
+    }
+    const stream = Readable.toWeb(
+      createReadStream(asset.storagePath),
+    ) as ReadableStream;
+    return new Response(stream, {
+      headers: {
+        ...commonHeaders,
+        "Content-Length": String(stat.size),
+      },
+    });
+  } catch {
+    return Response.json({ error: "文件已被清理或不可读" }, { status: 404 });
+  }
 }
