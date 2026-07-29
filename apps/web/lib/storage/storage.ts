@@ -1,8 +1,13 @@
 import type { VideoAsset } from "@video-diagnosis/shared-types";
 import * as cloud from "@/lib/storage/cloud-storage";
-import * as local from "@/lib/storage/private-storage";
+
+type LocalStorage = typeof import("@/lib/storage/private-storage");
 
 const sitesDeployment = process.env.SITES_DEPLOYMENT === "true";
+
+function localStorage(): LocalStorage {
+  return require("@/lib/storage/private-storage") as LocalStorage;
+}
 
 export function createAssetSignature(
   assetId: string,
@@ -11,7 +16,7 @@ export function createAssetSignature(
 ): string {
   return sitesDeployment
     ? cloud.createAssetSignature(assetId, ownerId, expires)
-    : local.createAssetSignature(assetId, ownerId, expires);
+    : localStorage().createAssetSignature(assetId, ownerId, expires);
 }
 
 export function verifyAssetSignature(
@@ -22,7 +27,7 @@ export function verifyAssetSignature(
 ): boolean {
   return sitesDeployment
     ? cloud.verifyAssetSignature(assetId, ownerId, expires, signature)
-    : local.verifyAssetSignature(assetId, ownerId, expires, signature);
+    : localStorage().verifyAssetSignature(assetId, ownerId, expires, signature);
 }
 
 export async function savePrivateVideo(
@@ -32,7 +37,7 @@ export async function savePrivateVideo(
 ): Promise<VideoAsset> {
   return sitesDeployment
     ? cloud.savePrivateVideo(ownerId, importId, file)
-    : local.savePrivateVideo(ownerId, importId, file);
+    : localStorage().savePrivateVideo(ownerId, importId, file);
 }
 
 export async function servePrivateVideo(
@@ -41,5 +46,5 @@ export async function servePrivateVideo(
 ): Promise<Response> {
   return sitesDeployment
     ? cloud.servePrivateVideo(request, asset)
-    : local.servePrivateVideo(request, asset);
+    : localStorage().servePrivateVideo(request, asset);
 }
