@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "Bundler",
+    "module": "ESNext",
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@video-diagnosis/shared-types": ["packages/shared-types/src/index.ts"],
+      "@video-diagnosis/database": ["packages/database/src/index.ts"],
+      "@video-diagnosis/prompt-templates": ["packages/prompt-templates/src/index.ts"]
+    }
+  }
+}

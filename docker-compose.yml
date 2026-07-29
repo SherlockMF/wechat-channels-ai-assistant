@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: video_diagnosis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/database/migrations/0001_initial.sql:/docker-entrypoint-initdb.d/0001_initial.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d video_diagnosis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      APP_MODE: REAL
+      NEXT_PUBLIC_APP_MODE: REAL
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_diagnosis
+      PRIVATE_STORAGE_ROOT: /app/.data/uploads
+      SIGNED_URL_SECRET: ${SIGNED_URL_SECRET:-local-compose-secret-change-me}
+    ports:
+      - "3000:3000"
+    volumes:
+      - private_uploads:/app/.data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      APP_MODE: REAL
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_diagnosis
+      PRIVATE_STORAGE_ROOT: /app/.data/uploads
+      SPEECH_PROVIDER: ${SPEECH_PROVIDER:-mock}
+      SPEECH_API_BASE_URL: ${SPEECH_API_BASE_URL:-}
+      SPEECH_API_KEY: ${SPEECH_API_KEY:-}
+      SPEECH_MODEL: ${SPEECH_MODEL:-whisper-1}
+      VISION_PROVIDER: ${VISION_PROVIDER:-mock}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - private_uploads:/app/.data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  private_uploads:

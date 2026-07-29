@@ -1,0 +1,20 @@
+{
+  "name": "wechat-channels-content-diagnosis",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @video-diagnosis/web",
+    "build": "npm run build --workspace @video-diagnosis/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace @video-diagnosis/web",
+    "test:worker": "python -m pytest apps/worker/tests",
+    "db:generate": "npm run db:generate --workspace @video-diagnosis/database"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
