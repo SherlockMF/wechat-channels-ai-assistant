@@ -441,6 +441,7 @@ export class CloudRepository {
         video.record.description,
         video.record.publishedAt,
         video.result.result,
+        video.analysisMode,
       )
     );
   }

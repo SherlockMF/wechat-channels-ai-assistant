@@ -25,7 +25,10 @@ import {
   sortByPublishedAt,
 } from "@/lib/metrics/account";
 import { buildRuleDiagnosis } from "@/lib/analysis/rules";
-import { buildLocalSourceState } from "@/lib/data/local-source";
+import {
+  buildLocalSourceState,
+  readLocalSourceFingerprint,
+} from "@/lib/data/local-source";
 
 const headers = [
   "视频描述",
@@ -182,6 +185,10 @@ describe("真实本地数据源", () => {
       expect(snapshot.state.assets).toHaveLength(2);
       expect(snapshot.matchedRelationshipCount).toBe(1);
       expect(snapshot.unmatchedAssetCount).toBe(1);
+      await fs.writeFile(path.join(videoDirectory, "新增视频.mp4"), "video");
+      expect(await readLocalSourceFingerprint()).not.toBe(
+        snapshot.fingerprint,
+      );
       expect(snapshot.state.assets[0]?.storagePath.startsWith(videoDirectory)).toBe(
         true,
       );

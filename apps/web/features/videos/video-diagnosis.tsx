@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   AlertCircle,
   ArrowRight,
@@ -42,6 +42,16 @@ const categoryLabel: Record<string, string> = {
   audio: "声音设计",
   structure: "内容结构",
 };
+const severityLabel = { low: "低", medium: "中", high: "高" } as const;
+const metricLabel: Record<string, string> = {
+  completion_rate: "完播率",
+  average_watch_seconds: "平均观看时长",
+  like_rate: "点赞率",
+  comment_rate: "评论率",
+  share_rate: "分享率",
+  follow_rate: "关注率",
+};
+
 const hookTypeLabel: Record<string, string> = {
   result: "结果型",
   pain_point: "痛点型",
@@ -75,26 +85,37 @@ export function VideoDiagnosis({
     next: ImportedVideoRecord | null;
   } | null>(null);
   const player = useRef<HTMLVideoElement>(null);
+  const latestVideoRequest = useRef(0);
 
-  async function loadVideo() {
+  async function loadVideo(
+    requestId = ++latestVideoRequest.current,
+  ) {
     try {
       const response = await fetch(`/api/videos/${videoId}`);
       if (!response.ok) throw new Error(`视频诊断读取失败（${response.status}）`);
-      setPayload(await response.json());
+      const nextPayload = await response.json();
+      if (requestId !== latestVideoRequest.current) return;
+      setPayload(nextPayload);
       setError("");
     } catch (loadError) {
+      if (requestId !== latestVideoRequest.current) return;
       setError(loadError instanceof Error ? loadError.message : "视频诊断读取失败");
     }
   }
 
   useEffect(() => {
-    void loadVideo();
+    const requestId = ++latestVideoRequest.current;
+    setPayload(null);
+    setNeighbors(null);
+    setError("");
+    void loadVideo(requestId);
     void fetch("/api/analysis")
       .then(async (response) => {
         if (!response.ok) return null;
         return response.json();
       })
       .then((body) => {
+        if (requestId !== latestVideoRequest.current) return;
         if (!body?.rows) return;
         const requested = new URL(returnTo, window.location.origin).searchParams.get("recent") ?? "5";
         const scoped = requested === "all" ? body.rows : body.rows.slice(0, Number(requested));
@@ -107,7 +128,12 @@ export function VideoDiagnosis({
           next: scoped[index + 1]?.record ?? null,
         });
       })
-      .catch(() => setNeighbors(null));
+      .catch(() => {
+        if (requestId === latestVideoRequest.current) setNeighbors(null);
+      });
+    return () => {
+      if (requestId === latestVideoRequest.current) latestVideoRequest.current += 1;
+    };
   }, [returnTo, videoId]);
 
   const chartData = useMemo(() => {
@@ -171,6 +197,24 @@ export function VideoDiagnosis({
           </div>
         </div>
       )}
+      {payload.result?.editedMarkdown && (
+        <Card className="border-[#dfc89f] bg-[#fff9ef] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <FileText size={18} className="mt-0.5 shrink-0 text-amber" />
+              <div>
+                <p className="font-bold">交付报告已人工修改</p>
+                <p className="mt-1 text-sm text-[#75664f]">
+                  下方保留原始结构化诊断；剪辑执行与对外分享请以可编辑报告为准。
+                </p>
+              </div>
+            </div>
+            <Link href={`/videos/${videoId}/report?returnTo=${encodeURIComponent(returnTo)}`} className="text-sm font-bold text-pine hover:underline">
+              查看人工版本
+            </Link>
+          </div>
+        </Card>
+      )}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(560px,1.08fr)]">
       <div className="space-y-6">
         <Card className="overflow-hidden">
@@ -230,20 +274,31 @@ export function VideoDiagnosis({
           </div>
           <div className="mt-5 h-44">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="metricFill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#1e6650" stopOpacity={0.34} />
-                    <stop offset="100%" stopColor="#1e6650" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={chartData} barCategoryGap="28%">
                 <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} />
                 <YAxis axisLine={false} tickLine={false} fontSize={10} unit="%" />
                 <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
-                <Area type="monotone" dataKey="value" stroke="#1e6650" strokeWidth={2} fill="url(#metricFill)" />
-              </AreaChart>
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {chartData.map((entry) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.name === "当前" ? "#c97718" : "#1e6650"}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
+          {result && (
+            <div className="mt-5 border-t border-line pt-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#7b8880]">完整诊断事实</p>
+              <ul className="mt-3 space-y-2 text-sm leading-6 text-[#5d6b64]">
+                {result.dataAssessment.facts.map((fact) => (
+                  <li key={fact}>· {fact}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
 
         <Card className="p-6">
@@ -314,6 +369,9 @@ export function VideoDiagnosis({
                         </span>
                         <span className="text-sm font-bold">{categoryLabel[problem.category] ?? problem.category}</span>
                       </div>
+                        <Badge tone={problem.severity === "high" ? "danger" : "neutral"}>
+                          {severityLabel[problem.severity]}优先级
+                        </Badge>
                       <button
                         onClick={() => seek(problem.startSecond)}
                         className="font-mono text-xs font-bold text-pine"
@@ -337,6 +395,15 @@ export function VideoDiagnosis({
                           合理推断
                         </p>
                         <p className="mt-2 text-sm leading-6">{problem.inference}</p>
+                        <div className="mt-4 border-t border-[#ead5b5] pt-3">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#9a641f]">
+                            建议动作
+                          </p>
+                          <p className="mt-1 text-sm leading-6">{problem.recommendation}</p>
+                          <p className="mt-2 text-xs text-[#806a4c]">
+                            目标：{metricLabel[problem.expectedMetric]} · 置信度：{confidenceLabel[problem.confidence]}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -362,9 +429,19 @@ export function VideoDiagnosis({
                     </button>
                     <div>
                       <p className="text-sm font-bold">{actionLabel[item.action] ?? item.action}</p>
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-[#7b8880]">原内容</p>
+                      <p className="mt-1 text-sm leading-5 text-[#637169]">{item.originalContent}</p>
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-[#7b8880]">问题</p>
+                      <p className="mt-1 text-sm leading-5 text-[#637169]">{item.problem}</p>
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-[#7b8880]">替换后</p>
                       <p className="mt-1 text-sm leading-5 text-[#637169]">
                         {item.replacementContent}
                       </p>
+                      {item.sourceAsset && (
+                        <p className="mt-2 text-xs font-semibold text-pine">
+                          原片取材：{item.sourceAsset.sourceStartSecond.toFixed(1)}–{item.sourceAsset.sourceEndSecond.toFixed(1)} 秒
+                        </p>
+                      )}
                     </div>
                     {item.requiresReshoot ? (
                       <Badge tone="warning">需要补拍</Badge>
@@ -391,8 +468,15 @@ export function VideoDiagnosis({
                       {item.startSecond.toFixed(1)}–{item.endSecond.toFixed(1)}s
                     </button>
                     <div>
-                      <p className="text-sm font-bold">{item.subtitle}</p>
-                      <p className="mt-1 text-sm leading-6 text-[#637169]">{item.visual}</p>
+                      <p className="text-sm leading-6"><span className="font-bold">口播：</span>{item.voiceover}</p>
+                      <p className="mt-1 text-sm leading-6"><span className="font-bold">字幕：</span>{item.subtitle}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#637169]"><span className="font-bold text-ink">画面：</span>{item.visual}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#637169]"><span className="font-bold text-ink">声音：</span>{item.audio}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#637169]"><span className="font-bold text-ink">节奏：</span>{item.editingRhythm}</p>
+                      {item.sourceAssetStartSecond !== undefined && item.sourceAssetEndSecond !== undefined && (
+                        <p className="mt-2 text-xs font-semibold text-pine">原片取材：{item.sourceAssetStartSecond.toFixed(1)}–{item.sourceAssetEndSecond.toFixed(1)} 秒</p>
+                      )}
+                      {item.requiresReshoot && <p className="mt-2 text-xs font-semibold text-amber">需要补拍</p>}
                     </div>
                   </div>
                 ))}
@@ -406,7 +490,9 @@ export function VideoDiagnosis({
                   {result.hookAlternatives.map((item) => (
                     <div key={`${item.type}-${item.voiceover}`} className="rounded-xl bg-fog p-3">
                       <Badge tone="info">{hookTypeLabel[item.type] ?? categoryLabel.hook}</Badge>
-                      <p className="mt-2 text-sm leading-6">{item.voiceover}</p>
+                      <p className="mt-2 text-sm leading-6"><span className="font-bold">口播：</span>{item.voiceover}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#637169]"><span className="font-bold text-ink">字幕：</span>{item.subtitle}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#637169]"><span className="font-bold text-ink">画面：</span>{item.visual}</p>
                     </div>
                   ))}
                 </div>
@@ -431,21 +517,40 @@ export function VideoDiagnosis({
                   <FileText size={17} className="text-pine" />
                   <h3 className="font-bold">文案与字幕</h3>
                 </div>
-                <p className="mt-3 text-sm leading-6 text-[#5d6b64]">
-                  {result.copySuggestions.revisedFullScript}
-                </p>
+                <div className="mt-3 space-y-3 text-sm leading-6 text-[#5d6b64]">
+                  <div>
+                    <p className="text-xs font-bold text-[#7b8880]">原内容概述</p>
+                    <p>{result.copySuggestions.originalSummary}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-[#7b8880]">完整脚本方向</p>
+                    <p>{result.copySuggestions.revisedFullScript}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-[#7b8880]">字幕版</p>
+                    <p>{result.copySuggestions.subtitleVersion}</p>
+                  </div>
+                </div>
               </Card>
               <Card className="p-5">
                 <div className="flex items-center gap-2">
                   <Volume2 size={17} className="text-pine" />
                   <h3 className="font-bold">声音与 BGM</h3>
                 </div>
-                <p className="mt-3 text-sm leading-6 text-[#5d6b64]">
-                  {result.audioSuggestions.musicMood} ·{" "}
-                  {result.audioSuggestions.bpmRange}
-                  <br />
-                  {result.audioSuggestions.voiceMusicBalance}
-                </p>
+                <div className="mt-3 space-y-3 text-sm leading-6 text-[#5d6b64]">
+                  <p><span className="font-bold text-ink">当前问题：</span>{result.audioSuggestions.currentIssues.join("；") || "未发现明确问题"}</p>
+                  <p><span className="font-bold text-ink">开头动作：</span>{result.audioSuggestions.openingAudioAction}</p>
+                  <p><span className="font-bold text-ink">音乐：</span>{result.audioSuggestions.musicMood} · {result.audioSuggestions.bpmRange ?? "按素材节奏确定"}</p>
+                  <p><span className="font-bold text-ink">混音：</span>{result.audioSuggestions.voiceMusicBalance}</p>
+                  <div>
+                    <p className="text-xs font-bold text-[#7b8880]">转场建议</p>
+                    <ul>{result.audioSuggestions.transitionSuggestions.map((item) => <li key={item}>· {item}</li>)}</ul>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-[#7b8880]">避免事项</p>
+                    <ul>{result.audioSuggestions.avoid.map((item) => <li key={item}>· {item}</li>)}</ul>
+                  </div>
+                </div>
               </Card>
             </div>
 

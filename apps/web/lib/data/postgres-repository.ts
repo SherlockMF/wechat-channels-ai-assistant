@@ -486,7 +486,8 @@ export class PostgresRepository {
        SET status='queued', progress=0, current_step='queued',
            retry_count=retry_count+1, error_code=NULL, error_message=NULL,
            started_at=NULL, completed_at=NULL
-       WHERE id=$1 AND owner_id=$2 RETURNING *`,
+       WHERE id=$1 AND owner_id=$2 AND status IN ('failed', 'cancelled')
+       RETURNING *`,
       [jobId, ownerId],
     );
     return result.rows[0] ? analysisJob(result.rows[0]) : null;
@@ -593,6 +594,7 @@ export class PostgresRepository {
         video.record.description,
         video.record.publishedAt,
         video.result.result,
+        video.analysisMode,
       )
     );
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Clipboard, Download, Save, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Badge, Button, Card } from "@/components/ui";
@@ -14,12 +14,17 @@ export function ReportEditor({
 }) {
   const [markdown, setMarkdown] = useState("");
   const [savedMarkdown, setSavedMarkdown] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState<"adopted" | "inaccurate" | "">("");
+  const popGuardActive = useRef(false);
+  const restoringGuard = useRef(false);
   const dirty = markdown !== savedMarkdown;
 
   useEffect(() => {
+    setLoading(true);
     void fetch(`/api/videos/${videoId}/report`)
       .then(async (response) => {
         if (!response.ok) throw new Error(`报告读取失败（${response.status}）`);
@@ -31,8 +36,16 @@ export function ReportEditor({
         setSavedMarkdown(next);
         setError("");
       })
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "报告读取失败"));
-    const storedFeedback = window.localStorage.getItem(`video-feedback:${videoId}`);
+      .catch((loadError) =>
+        setError(loadError instanceof Error ? loadError.message : "报告读取失败"),
+      )
+      .finally(() => setLoading(false));
+    let storedFeedback: string | null = null;
+    try {
+      storedFeedback = window.localStorage.getItem(`video-feedback:${videoId}`);
+    } catch {
+      storedFeedback = null;
+    }
     if (storedFeedback === "adopted" || storedFeedback === "inaccurate") {
       setFeedback(storedFeedback);
     }
@@ -60,7 +73,45 @@ export function ReportEditor({
     };
   }, [dirty]);
 
+  useEffect(() => {
+    if (!dirty) {
+      if (popGuardActive.current) {
+        popGuardActive.current = false;
+        restoringGuard.current = true;
+        window.history.back();
+      }
+      return;
+    }
+    restoringGuard.current = false;
+    if (!popGuardActive.current) {
+      window.history.pushState(
+        { ...window.history.state, reportUnsavedGuard: true },
+        "",
+        window.location.href,
+      );
+      popGuardActive.current = true;
+    }
+    function guardBrowserBack() {
+      if (restoringGuard.current) {
+        restoringGuard.current = false;
+        return;
+      }
+      if (!popGuardActive.current) return;
+      if (window.confirm("报告还有未保存修改，确定离开吗？")) {
+        popGuardActive.current = false;
+        window.history.back();
+      } else {
+        restoringGuard.current = true;
+        window.history.forward();
+      }
+    }
+    window.addEventListener("popstate", guardBrowserBack);
+    return () => window.removeEventListener("popstate", guardBrowserBack);
+  }, [dirty]);
+
   async function save() {
+    if (loading || saving || !dirty) return;
+    setSaving(true);
     setStatus("保存中…");
     try {
       const response = await fetch(`/api/videos/${videoId}/report`, {
@@ -75,6 +126,8 @@ export function ReportEditor({
     } catch (saveError) {
       setStatus("保存失败");
       setError(saveError instanceof Error ? saveError.message : "报告保存失败");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -90,7 +143,11 @@ export function ReportEditor({
 
   function recordFeedback(value: "adopted" | "inaccurate") {
     setFeedback(value);
-    window.localStorage.setItem(`video-feedback:${videoId}`, value);
+    try {
+      window.localStorage.setItem(`video-feedback:${videoId}`, value);
+    } catch {
+      // localStorage may be unavailable in restricted browser contexts.
+    }
     setStatus(value === "adopted" ? "已记录：已采用" : "已记录：不准确");
   }
 
@@ -114,25 +171,42 @@ export function ReportEditor({
           </div>
         )}
         <div className="flex flex-col gap-3 border-b border-line bg-[#fafbfa] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <Badge tone="info">可编辑草稿</Badge>
-            {(status || dirty) && (
-              <span className="flex items-center gap-1 text-xs font-semibold text-pine">
-                <Check size={13} />
-                {dirty ? "有未保存修改" : status}
-              </span>
-            )}
+          <div>
+            <div className="flex items-center gap-2">
+              <Badge tone="info">可编辑交付稿</Badge>
+              {(loading || status || dirty) && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-pine">
+                  <Check size={13} />
+                  {loading ? "正在加载报告…" : dirty ? "有未保存修改" : status}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-[#748179]">初始内容与诊断页一致；保存修改后成为独立人工交付版本。</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={copy}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={loading}
+              onClick={copy}
+            >
               <Clipboard size={13} />
               复制全文
             </Button>
-            <Button size="sm" variant="secondary" onClick={download}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={loading}
+              onClick={download}
+            >
               <Download size={13} />
               导出 Markdown
             </Button>
-            <Button size="sm" onClick={save}>
+            <Button
+              size="sm"
+              disabled={loading || saving || !dirty}
+              onClick={save}
+            >
               <Save size={13} />
               保存
             </Button>
@@ -140,6 +214,7 @@ export function ReportEditor({
         </div>
         <textarea
           value={markdown}
+          disabled={loading}
           onChange={(event) => setMarkdown(event.target.value)}
           spellCheck={false}
           className="min-h-[720px] w-full resize-y border-0 bg-white p-7 font-mono text-[13px] leading-6 outline-none"

@@ -42,11 +42,20 @@ describe("运营报告可读性", () => {
       record.description,
       record.publishedAt,
       result,
+      "codex_multimodal",
     );
 
     expect(markdown).toContain("开头钩子");
     expect(markdown).toContain("平均观看时长");
     expect(markdown).toContain("置信度：中");
+    expect(markdown).toContain("分析来源：Codex 多模态诊断");
+    expect(markdown).toContain(`## ${result.primaryProblems.length} 个主要问题`);
+    expect(markdown).toContain(result.editingPlan[0]!.originalContent);
+    expect(markdown).toContain(result.editingPlan[0]!.problem);
+    expect(markdown).toContain(result.hookAlternatives[0]!.subtitle);
+    expect(markdown).toContain(result.hookAlternatives[0]!.visual);
+    expect(markdown).toContain(result.audioSuggestions.openingAudioAction);
+    expect(markdown).toContain(result.audioSuggestions.avoid[0]!);
     expect(markdown).not.toContain("average_watch_seconds");
     expect(markdown).not.toContain("置信度：medium");
   });

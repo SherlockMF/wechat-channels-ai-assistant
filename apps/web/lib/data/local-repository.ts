@@ -19,6 +19,7 @@ import {
   buildLocalSourceState,
   LOCAL_SOURCE_IMPORT_ID,
   localSourcePaths,
+  readLocalSourceFingerprint,
 } from "@/lib/data/local-source";
 
 const dataRoot = path.join(localSourcePaths().workspaceRoot, ".data");
@@ -26,6 +27,8 @@ const databasePath = path.join(dataRoot, "local-state.json");
 let mutationQueue = Promise.resolve();
 let cachedState: PersistedLocalState | null = null;
 let cachedDatabaseStamp: string | null = null;
+let cachedSourceCheckedAt = 0;
+const SOURCE_CHECK_INTERVAL_MS = 2_000;
 
 async function databaseStamp(): Promise<string | null> {
   try {
@@ -43,7 +46,21 @@ interface PersistedLocalState extends AppState {
 
 async function readState(): Promise<PersistedLocalState> {
   const currentDatabaseStamp = await databaseStamp();
-  if (cachedState && currentDatabaseStamp === cachedDatabaseStamp) {
+  const now = Date.now();
+  if (
+    cachedState &&
+    currentDatabaseStamp === cachedDatabaseStamp &&
+    now - cachedSourceCheckedAt < SOURCE_CHECK_INTERVAL_MS
+  ) {
+    return cachedState;
+  }
+  const currentSourceFingerprint = await readLocalSourceFingerprint();
+  cachedSourceCheckedAt = now;
+  if (
+    cachedState &&
+    currentDatabaseStamp === cachedDatabaseStamp &&
+    cachedState.sourceFingerprint === currentSourceFingerprint
+  ) {
     return cachedState;
   }
   const source = await buildLocalSourceState();
@@ -306,14 +323,45 @@ export class LocalRepository {
       const job = state.jobs.find(
         (item) => item.id === jobId && item.ownerId === ownerId,
       );
-      if (!job) return null;
-      job.status = "queued";
-      job.progress = 0;
-      job.currentStep = "queued";
+      if (
+        !job ||
+        (job.status !== "failed" && job.status !== "cancelled")
+      ) return null;
+      const record = state.records.find(
+        (item) => item.id === job.videoRecordId,
+      );
+      const asset = state.assets.find((item) => item.id === job.videoAssetId);
+      if (!record || !asset) return null;
+      const now = new Date().toISOString();
+      const diagnosis = buildRuleDiagnosis(
+        record,
+        calculateAccountBaseline(state.records),
+        asset.durationSeconds,
+      );
+      const result = state.results.find(
+        (item) => item.analysisJobId === job.id,
+      );
+      if (result) {
+        result.result = diagnosis;
+        result.updatedAt = now;
+      } else {
+        state.results.push({
+          id: createId(),
+          analysisJobId: job.id,
+          result: diagnosis,
+          editedMarkdown: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      job.status = "completed";
+      job.progress = 100;
+      job.currentStep = "local_rule_completed";
       job.retryCount += 1;
       job.errorCode = null;
       job.errorMessage = null;
-      job.completedAt = null;
+      job.startedAt = now;
+      job.completedAt = now;
       return job;
     });
   }
@@ -387,6 +435,7 @@ export class LocalRepository {
         video.record.description,
         video.record.publishedAt,
         video.result.result,
+        video.analysisMode,
       )
     );
   }

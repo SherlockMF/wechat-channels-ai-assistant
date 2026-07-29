@@ -29,12 +29,31 @@ const metricLabel: Record<string, string> = {
   follow_rate: "关注率",
 };
 const confidenceLabel: Record<string, string> = { low: "低", medium: "中", high: "高" };
+const hookTypeLabel: Record<string, string> = {
+  result: "结果型",
+  pain_point: "痛点型",
+  suspense: "悬念型",
+};
+const analysisModeLabel: Record<string, string> = {
+  local_rule: "本地规则诊断",
+  codex_multimodal: "Codex 多模态诊断",
+  worker: "Worker 内容诊断",
+};
+
 
 export function diagnosisToMarkdown(
   title: string,
   publishedAt: string,
   result: DiagnosisResult,
+  analysisMode?: string,
 ): string {
+  const openingEndSecond = Math.max(
+    0,
+    ...result.revisedOpening.map((item) => item.endSecond),
+  );
+  const openingLabel = Number.isInteger(openingEndSecond)
+    ? String(openingEndSecond)
+    : openingEndSecond.toFixed(1);
   const problemText = result.primaryProblems
     .map(
       (problem, index) => `### ${index + 1}. ${categoryLabel[problem.category] ?? problem.category}（${problem.startSecond.toFixed(1)}–${problem.endSecond.toFixed(1)} 秒）
@@ -56,7 +75,9 @@ export function diagnosisToMarkdown(
             : item.requiresReshoot
               ? "（需要补拍）"
               : ""
-        }`,
+        }
+  - 原内容：${item.originalContent}
+  - 问题：${item.problem}`,
     )
     .join("\n");
 
@@ -66,7 +87,8 @@ export function diagnosisToMarkdown(
 
 - 标题：${title}
 - 发布时间：${publishedAt}
-- 诊断性质：基于账号整体指标与内容特征的辅助建议
+- 分析来源：${analysisMode ? analysisModeLabel[analysisMode] ?? analysisMode : "结构化内容诊断"}
+- 诊断性质：基于账号指标与内容证据的辅助建议
 
 ## 执行摘要
 
@@ -76,7 +98,7 @@ ${result.executiveSummary}
 
 ${result.dataAssessment.facts.map((fact) => `- ${fact}`).join("\n")}
 
-## 三个主要问题
+## ${result.primaryProblems.length} 个主要问题
 
 ${problemText}
 
@@ -84,27 +106,32 @@ ${problemText}
 
 ${editingText}
 
-## 新版前 10 秒
+## 新版前 ${openingLabel} 秒
 
 ${result.revisedOpening
   .map(
     (item) =>
-      `- **${item.startSecond}–${item.endSecond} 秒**：画面「${item.visual}」；口播「${item.voiceover}」；字幕「${item.subtitle}」；节奏「${item.editingRhythm}」${item.requiresReshoot ? "（需要补拍）" : ""}`,
+      `- **${item.startSecond}–${item.endSecond} 秒**：画面「${item.visual}」；口播「${item.voiceover}」；字幕「${item.subtitle}」；声音「${item.audio}」；节奏「${item.editingRhythm}」${item.sourceAssetStartSecond !== undefined && item.sourceAssetEndSecond !== undefined ? `；原片素材 ${item.sourceAssetStartSecond.toFixed(1)}–${item.sourceAssetEndSecond.toFixed(1)} 秒` : ""}${item.requiresReshoot ? "（需要补拍）" : ""}`,
   )
   .join("\n")}
 
 ## 开头备选
 
-${result.hookAlternatives.map((item) => `- ${item.type === "result" ? "结果型" : item.type === "pain_point" ? "痛点型" : "悬念型"}：${item.voiceover}`).join("\n")}
+${result.hookAlternatives.map((item) => `- ${hookTypeLabel[item.type] ?? item.type}：口播「${item.voiceover}」；字幕「${item.subtitle}」；画面「${item.visual}」`).join("\n")}
 
 ## 文案与声音
 
+- 原内容概述：${result.copySuggestions.originalSummary}
 - 完整脚本方向：${result.copySuggestions.revisedFullScript}
 - 字幕版：${result.copySuggestions.subtitleVersion}
 - CTA：${result.copySuggestions.cta}
 - 音乐情绪：${result.audioSuggestions.musicMood}
+- 当前声音问题：${result.audioSuggestions.currentIssues.join("；") || "未发现明确问题"}
+- 开头声音动作：${result.audioSuggestions.openingAudioAction}
 - BPM：${result.audioSuggestions.bpmRange ?? "按素材节奏确定"}
 - 人声与音乐：${result.audioSuggestions.voiceMusicBalance}
+- 转场建议：${result.audioSuggestions.transitionSuggestions.join("；") || "无"}
+- 避免事项：${result.audioSuggestions.avoid.join("；") || "无"}
 
 ## 局限说明
 

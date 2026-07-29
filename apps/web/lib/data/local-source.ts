@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import * as XLSX from "xlsx";
 import type {
@@ -31,6 +32,16 @@ export interface LocalSourceSnapshot {
   unmatchedAssetCount: number;
 }
 
+interface LocalSourceInventory {
+  paths: LocalSourcePaths;
+  workbookStat: Stats;
+  filenames: string[];
+  fileStats: Array<{
+    filename: string;
+    stat: Stats;
+  }>;
+}
+
 function workspaceRoot(): string {
   const configured = process.env.LOCAL_WORKSPACE_ROOT?.trim();
   if (configured) return path.resolve(configured);
@@ -60,6 +71,48 @@ export function localSourcePaths(): LocalSourcePaths {
       DEFAULT_VIDEO_DIRECTORY,
     ),
   };
+}
+
+function fingerprintInventory(inventory: LocalSourceInventory): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        workbook: [inventory.workbookStat.size, inventory.workbookStat.mtimeMs],
+        videos: inventory.fileStats.map(({ filename, stat }) => [
+          filename,
+          stat.size,
+          stat.mtimeMs,
+        ]),
+      }),
+    )
+    .digest("hex");
+}
+
+async function readLocalSourceInventory(): Promise<LocalSourceInventory> {
+  const paths = localSourcePaths();
+  const [workbookStat, directoryEntries] = await Promise.all([
+    fs.stat(paths.workbookPath),
+    fs.readdir(paths.videoDirectory, { withFileTypes: true }),
+  ]);
+  const filenames = directoryEntries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
+    )
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  const fileStats = await Promise.all(
+    filenames.map(async (filename) => ({
+      filename,
+      stat: await fs.stat(path.join(paths.videoDirectory, filename)),
+    })),
+  );
+  return { paths, workbookStat, filenames, fileStats };
+}
+
+export async function readLocalSourceFingerprint(): Promise<string> {
+  return fingerprintInventory(await readLocalSourceInventory());
 }
 
 function stableId(seed: string): string {
@@ -100,38 +153,10 @@ function matchedFilenames(buffer: Uint8Array): Map<number, string> {
 }
 
 export async function buildLocalSourceState(): Promise<LocalSourceSnapshot> {
-  const paths = localSourcePaths();
-  const [workbookBuffer, workbookStat, directoryEntries] = await Promise.all([
-    fs.readFile(paths.workbookPath),
-    fs.stat(paths.workbookPath),
-    fs.readdir(paths.videoDirectory, { withFileTypes: true }),
-  ]);
-  const filenames = directoryEntries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
-    )
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right, "zh-CN"));
-  const fileStats = await Promise.all(
-    filenames.map(async (filename) => ({
-      filename,
-      stat: await fs.stat(path.join(paths.videoDirectory, filename)),
-    })),
-  );
-  const fingerprint = createHash("sha256")
-    .update(
-      JSON.stringify({
-        workbook: [workbookStat.size, workbookStat.mtimeMs],
-        videos: fileStats.map(({ filename, stat }) => [
-          filename,
-          stat.size,
-          stat.mtimeMs,
-        ]),
-      }),
-    )
-    .digest("hex");
+  const inventory = await readLocalSourceInventory();
+  const { paths, workbookStat, filenames, fileStats } = inventory;
+  const workbookBuffer = await fs.readFile(paths.workbookPath);
+  const fingerprint = fingerprintInventory(inventory);
 
   const preview = parseWorkbook(workbookBuffer, LOCAL_SOURCE_IMPORT_ID);
   if (preview.errors.length > 0 || preview.records.length === 0) {

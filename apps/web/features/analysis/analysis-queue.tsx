@@ -40,8 +40,10 @@ function jobStepLabel(step: string): string {
     local_rule_completed: "本地规则诊断完成",
     codex_multimodal_completed: "Codex 多模态诊断完成",
     queued: "等待处理",
+    processing: "正在分析",
     completed: "分析完成",
     failed: "分析失败",
+    cancelled: "分析已取消",
   };
   return labels[step] ?? step;
 }
@@ -55,21 +57,27 @@ export function AnalysisQueue({
   const [recent, setRecent] = useState<"5" | "10" | "20" | "all">(initialRecent);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const restoredScroll = useRef(false);
+  const latestLoad = useRef(0);
 
   async function load(silent = false) {
+    const requestId = ++latestLoad.current;
     if (!silent) setLoading(true);
     try {
       const response = await fetch("/api/analysis");
       if (!response.ok) throw new Error(`队列读取失败（${response.status}）`);
-      setRows((await response.json()).rows);
+      const nextRows = (await response.json()).rows;
+      if (requestId !== latestLoad.current) return;
+      setRows(nextRows);
       setError("");
     } catch (loadError) {
+      if (requestId !== latestLoad.current) return;
       setError(loadError instanceof Error ? loadError.message : "队列读取失败");
     } finally {
-      setLoading(false);
+      if (requestId === latestLoad.current) setLoading(false);
     }
   }
 
@@ -160,8 +168,21 @@ export function AnalysisQueue({
   }
 
   async function retry(jobId: string) {
-    await fetch(`/api/analysis/${jobId}/retry`, { method: "POST" });
-    await load();
+    setRetryingId(jobId);
+    setError("");
+    try {
+      const response = await fetch(`/api/analysis/${jobId}/retry`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(`重新运行失败（${response.status}）`);
+      await load(true);
+    } catch (retryError) {
+      setError(
+        retryError instanceof Error ? retryError.message : "重新运行失败",
+      );
+    } finally {
+      setRetryingId(null);
+    }
   }
 
   const columns = useMemo<ColumnDef<QueueRow>[]>(
@@ -240,13 +261,15 @@ export function AnalysisQueue({
           const tone =
             job.status === "completed"
               ? "success"
-              : job.status === "failed"
+              : job.status === "failed" || job.status === "cancelled"
                 ? "danger"
                 : "info";
+          const showProgress =
+            job.status === "queued" || job.status === "processing";
           return (
             <div className="w-36">
               <Badge tone={tone}>{jobStepLabel(job.currentStep)}</Badge>
-              {job.status !== "completed" && (
+              {showProgress && (
                 <div className="mt-2">
                   <Progress value={job.progress} />
                 </div>
@@ -271,10 +294,16 @@ export function AnalysisQueue({
                   查看
                 </Link>
               )}
-              {job?.status === "failed" && (
-                <Button size="sm" variant="secondary" onClick={() => retry(job.id)}>
+              {(job?.status === "failed" || job?.status === "cancelled") && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={retryingId === job.id}
+                  title="重新运行本地规则"
+                  onClick={() => retry(job.id)}
+                >
                   <RotateCcw size={13} />
-                  重试
+                  {retryingId === job.id ? "重新运行中…" : "重新运行本地规则"}
                 </Button>
               )}
             </div>
@@ -282,7 +311,7 @@ export function AnalysisQueue({
         },
       },
     ],
-    [allAnalyzableSelected, analyzableIds, recent, selected],
+    [allAnalyzableSelected, analyzableIds, recent, retryingId, selected],
   );
 
   const table = useReactTable({
