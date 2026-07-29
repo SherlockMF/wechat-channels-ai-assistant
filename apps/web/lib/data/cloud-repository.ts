@@ -13,6 +13,7 @@ import type {
 import { calculateAccountBaseline, sortByPublishedAt } from "@/lib/metrics/account";
 import { buildRuleDiagnosis } from "@/lib/analysis/rules";
 import { diagnosisToMarkdown } from "@/lib/analysis/markdown";
+import { selectPreferredAnalysisJob } from "@/lib/data/job-selection";
 
 interface D1Statement {
   bind(...values: unknown[]): D1Statement;
@@ -287,9 +288,7 @@ export class CloudRepository {
       );
       const asset = state.assets.find((item) => item.id === match.videoAssetId);
       if (!record || !asset) return [];
-      const job = [...state.jobs]
-        .reverse()
-        .find((item) => item.videoRecordId === record.id);
+      const job = selectPreferredAnalysisJob(state.jobs, record.id);
       return [{ record, asset, match, job: job ?? null }];
     });
     return rows
@@ -384,9 +383,7 @@ export class CloudRepository {
     const asset = match
       ? state.assets.find((item) => item.id === match.videoAssetId)
       : null;
-    const job = [...state.jobs]
-      .reverse()
-      .find((item) => item.videoRecordId === videoId);
+    const job = selectPreferredAnalysisJob(state.jobs, videoId);
     const result = job
       ? state.results.find((item) => item.analysisJobId === job.id)
       : null;
@@ -419,9 +416,7 @@ export class CloudRepository {
             (item) => item.id === record.importId && item.ownerId === ownerId,
           )
         : null;
-      const job = [...state.jobs]
-        .reverse()
-        .find((item) => item.videoRecordId === videoId);
+      const job = selectPreferredAnalysisJob(state.jobs, videoId);
       const result = job
         ? state.results.find((item) => item.analysisJobId === job.id)
         : null;

@@ -421,7 +421,17 @@ export class PostgresRepository {
        LEFT JOIN LATERAL (
          SELECT * FROM analysis_jobs candidate
          WHERE candidate.video_record_id=r.id
-         ORDER BY candidate.created_at DESC LIMIT 1
+         ORDER BY
+           CASE
+             WHEN candidate.status='completed'
+               AND candidate.current_step='codex_multimodal_completed' THEN 3
+             WHEN candidate.status='completed'
+               AND candidate.current_step='local_rule_completed' THEN 1
+             WHEN candidate.status='completed' THEN 2
+             ELSE 0
+           END DESC,
+           candidate.created_at DESC
+         LIMIT 1
        ) j ON true
        WHERE m.status='matched' AND r.owner_id=$1
        ORDER BY r.published_at DESC, r.spreadsheet_row ASC`,
@@ -510,7 +520,17 @@ export class PostgresRepository {
       ),
       this.pool.query(
         `SELECT * FROM analysis_jobs WHERE video_record_id=$1
-         ORDER BY created_at DESC LIMIT 1`,
+         ORDER BY
+           CASE
+             WHEN status='completed'
+               AND current_step='codex_multimodal_completed' THEN 3
+             WHEN status='completed'
+               AND current_step='local_rule_completed' THEN 1
+             WHEN status='completed' THEN 2
+             ELSE 0
+           END DESC,
+           created_at DESC
+         LIMIT 1`,
         [videoId],
       ),
       this.pool.query(

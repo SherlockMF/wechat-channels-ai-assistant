@@ -25,6 +25,8 @@ import {
   sortByPublishedAt,
 } from "@/lib/metrics/account";
 import { buildRuleDiagnosis } from "@/lib/analysis/rules";
+import { selectPreferredAnalysisJob } from "@/lib/data/job-selection";
+import type { AnalysisJob } from "@/lib/data/types";
 import {
   buildLocalSourceState,
   readLocalSourceFingerprint,
@@ -256,6 +258,34 @@ describe("排序、指标与诊断约束", () => {
     record("c", "C", "2026-01-03T00:00:00.000Z", 2),
   ];
 
+  it("同一视频优先使用已完成的 Codex 多模态结果", () => {
+    const baseJob: AnalysisJob = {
+      id: "local-job",
+      ownerId: "owner",
+      videoRecordId: "video",
+      videoAssetId: "asset",
+      status: "completed",
+      progress: 100,
+      currentStep: "local_rule_completed",
+      retryCount: 0,
+      errorCode: null,
+      errorMessage: null,
+      startedAt: "2026-01-03T00:00:00.000Z",
+      completedAt: "2026-01-03T00:00:00.000Z",
+      createdAt: "2026-01-03T00:00:00.000Z",
+    };
+    const codexJob: AnalysisJob = {
+      ...baseJob,
+      id: "codex-job",
+      currentStep: "codex_multimodal_completed",
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+
+    expect(
+      selectPreferredAnalysisJob([codexJob, baseJob], "video")?.id,
+    ).toBe("codex-job");
+    expect(selectPreferredAnalysisJob([baseJob], "other")).toBeNull();
+  });
   it("发布时间降序且同时间按 Excel 行号升序", () => {
     expect(sortByPublishedAt(records).map((item) => item.id)).toEqual([
       "c",
