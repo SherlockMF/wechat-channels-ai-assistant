@@ -3,7 +3,7 @@ import { repository } from "@/lib/data/repository";
 import {
   servePrivateVideo,
   verifyAssetSignature,
-} from "@/lib/storage/private-storage";
+} from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ assetId: string }> };

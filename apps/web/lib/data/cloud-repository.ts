@@ -1,4 +1,3 @@
-﻿import { env } from "cloudflare:workers";
 import type {
   ImportedVideoRecord,
   VideoAsset,
@@ -46,7 +45,9 @@ let mutationQueue = Promise.resolve();
 let schemaReady: Promise<void> | null = null;
 
 function database(): D1DatabaseBinding {
-  const db = (env as unknown as CloudBindings).DB;
+  const db = (
+    globalThis as typeof globalThis & { __SITES_ENV__?: CloudBindings }
+  ).__SITES_ENV__?.DB;
   if (!db) throw new Error("Sites D1 binding `DB` 不可用");
   return db;
 }

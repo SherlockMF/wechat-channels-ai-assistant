@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
-import { createAssetSignature } from "@/lib/storage/private-storage";
+import { createAssetSignature } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 

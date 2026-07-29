@@ -1,6 +1,5 @@
-﻿import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import path from "node:path";
-import { env } from "cloudflare:workers";
 import type { VideoAsset } from "@video-diagnosis/shared-types";
 import { createId } from "@/lib/id";
 import { normalizeTitle } from "@/lib/imports/normalize";
@@ -42,7 +41,9 @@ const allowedMimeTypes = new Set([
 ]);
 
 function bindings(): CloudBindings {
-  return env as unknown as CloudBindings;
+  return (
+    globalThis as typeof globalThis & { __SITES_ENV__?: CloudBindings }
+  ).__SITES_ENV__ ?? ({} as CloudBindings);
 }
 
 function mediaBucket(): R2BucketBinding {

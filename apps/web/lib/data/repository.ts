@@ -1,9 +1,13 @@
+import { CloudRepository } from "@/lib/data/cloud-repository";
 import { LocalRepository } from "@/lib/data/local-repository";
 import { PostgresRepository } from "@/lib/data/postgres-repository";
 
-// LOCAL 直接读取用户指定的工作簿和视频目录；REAL 与 Worker 共享 PostgreSQL。
-export const repository =
-  process.env.APP_MODE === "REAL"
+const sitesDeployment = process.env.SITES_DEPLOYMENT === "true";
+
+// Sites uses D1/R2; LOCAL reads the workbook/video directory; REAL shares PostgreSQL with Worker.
+export const repository = sitesDeployment
+  ? new CloudRepository()
+  : process.env.APP_MODE === "REAL"
     ? new PostgresRepository()
     : new LocalRepository();
 

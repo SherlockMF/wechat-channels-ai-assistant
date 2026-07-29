@@ -1,7 +1,5 @@
-﻿import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import vinext from "vinext";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
@@ -9,32 +7,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
-const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
-
-function cloudRuntimeAliases(): Plugin {
-  const aliases = new Map([
-    [
-      "@/lib/data/repository",
-      resolve(appRoot, "lib/data/cloud-repository.ts"),
-    ],
-    [
-      "@/lib/data/migration",
-      resolve(appRoot, "lib/data/cloud-migration.ts"),
-    ],
-    [
-      "@/lib/storage/private-storage",
-      resolve(appRoot, "lib/storage/cloud-storage.ts"),
-    ],
-  ]);
-  return {
-    name: "cloud-runtime-aliases",
-    enforce: "pre",
-    resolveId(source) {
-      return aliases.get(source) ?? null;
-    },
-  };
-}
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -66,11 +39,13 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: {
+      "process.env.SITES_DEPLOYMENT": JSON.stringify("true"),
+    },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
     plugins: [
-      cloudRuntimeAliases(),
       vinext(),
       sites(),
       cloudflare({

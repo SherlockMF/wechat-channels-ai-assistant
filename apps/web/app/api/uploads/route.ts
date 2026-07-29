@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
 import { matchAssets } from "@/lib/matching/similarity";
-import { savePrivateVideo } from "@/lib/storage/private-storage";
+import { savePrivateVideo } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 

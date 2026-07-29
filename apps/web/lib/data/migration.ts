@@ -1,16 +1,27 @@
-﻿import type { AppState } from "@/lib/data/types";
+import type { AppState } from "@/lib/data/types";
+import {
+  migrateState as migrateCloudState,
+  migrateVideo as migrateCloudVideo,
+  migrationStatus as cloudMigrationStatus,
+} from "@/lib/data/cloud-migration";
 
-export async function migrateState(_state: AppState): Promise<never> {
-  throw new Error("?????? Sites ??????");
+const sitesDeployment = process.env.SITES_DEPLOYMENT === "true";
+
+export async function migrateState(state: AppState) {
+  if (!sitesDeployment) throw new Error("Migration is only available on Sites");
+  return migrateCloudState(state);
 }
 
 export async function migrateVideo(
-  _assetId: string,
-  _body: ReadableStream<Uint8Array>,
-): Promise<never> {
-  throw new Error("?????? Sites ??????");
+  assetId: string,
+  body: ReadableStream<Uint8Array>,
+) {
+  if (!sitesDeployment) throw new Error("Migration is only available on Sites");
+  return migrateCloudVideo(assetId, body);
 }
 
 export async function migrationStatus() {
-  return { available: false };
+  return sitesDeployment
+    ? cloudMigrationStatus()
+    : { available: false };
 }
