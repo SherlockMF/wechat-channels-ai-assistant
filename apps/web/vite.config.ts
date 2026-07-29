@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
@@ -7,6 +9,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
+const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
@@ -39,6 +42,22 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    resolve: {
+      alias: [
+        {
+          find: "@/lib/data/repository",
+          replacement: resolve(appRoot, "lib/data/cloud-repository.ts"),
+        },
+        {
+          find: "@/lib/data/migration",
+          replacement: resolve(appRoot, "lib/data/cloud-migration.ts"),
+        },
+        {
+          find: "@/lib/storage/storage",
+          replacement: resolve(appRoot, "lib/storage/cloud-storage.ts"),
+        },
+      ],
+    },
     define: {
       "process.env.SITES_DEPLOYMENT": JSON.stringify("true"),
     },
