@@ -241,6 +241,9 @@ describe("标题标准化与匹配", () => {
       height: 1920,
       fps: 30,
       processingStatus: "uploaded",
+      coverPath: null,
+      coverSource: null,
+      coverFrameSecond: null,
     };
     const match = matchAsset(asset, [
       record("a", "智能门锁安装避坑指南", "2026-01-01T00:00:00.000Z", 2),

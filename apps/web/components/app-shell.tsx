@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Clapperboard,
   Database,
   FileSpreadsheet,
   Film,
+  ScrollText,
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/components/ui";
@@ -14,24 +16,29 @@ import { cn } from "@/components/ui";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const localMode = process.env.NEXT_PUBLIC_APP_MODE !== "REAL";
+  // 工作流顺序：脚本工作台 → 发布前审片 → 数据匹配 → 数据分析
   const navigation = localMode
     ? [
+        { href: "/scripts", label: "脚本工作台", icon: ScrollText },
+        { href: "/review", label: "发布前审片", icon: Clapperboard },
         {
           href: "/imports/local-source/matching",
-          label: "真实数据",
+          label: "数据匹配",
           icon: Database,
         },
-        { href: "/analysis", label: "分析队列", icon: BarChart3 },
+        { href: "/analysis", label: "数据分析", icon: BarChart3 },
       ]
     : [
-        { href: "/imports/new", label: "创建分析", icon: FileSpreadsheet },
-        { href: "/analysis", label: "分析队列", icon: BarChart3 },
+        { href: "/scripts", label: "脚本工作台", icon: ScrollText },
+        { href: "/review", label: "发布前审片", icon: Clapperboard },
+        { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet },
+        { href: "/analysis", label: "数据分析", icon: BarChart3 },
       ];
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-line/90 bg-[#f8faf8]/95 backdrop-blur">
         <div className="mx-auto flex min-h-[70px] max-w-[1560px] flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-0">
-          <Link href={localMode ? "/analysis" : "/imports/new"} className="flex items-center gap-3">
+          <Link href="/scripts" className="flex items-center gap-3">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-ink text-white">
               <Film size={18} />
             </span>
@@ -50,7 +57,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const active =
                 item.href === "/analysis"
                   ? pathname === "/analysis" || pathname.startsWith("/videos/")
-                  : pathname.startsWith(item.href);
+                  : item.href === "/review"
+                    ? pathname.startsWith("/review")
+                    : item.href === "/scripts"
+                      ? pathname.startsWith("/scripts")
+                      : pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}

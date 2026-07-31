@@ -1,7 +1,11 @@
 import type {
   AnalysisJobStatus,
   DiagnosisResult,
+  DraftReview,
+  DraftReviewResult,
+  DraftReviewVersion,
   ImportedVideoRecord,
+  ScriptDraft,
   VideoAsset,
   VideoMatch,
 } from "@video-diagnosis/shared-types";
@@ -50,6 +54,10 @@ export interface AppState {
   matches: VideoMatch[];
   jobs: AnalysisJob[];
   results: AnalysisResultEntry[];
+  draftReviews: DraftReview[];
+  draftReviewVersions: DraftReviewVersion[];
+  draftResults: DraftReviewResult[];
+  scriptDrafts: ScriptDraft[];
 }
 
 export const emptyState = (): AppState => ({
@@ -59,4 +67,8 @@ export const emptyState = (): AppState => ({
   matches: [],
   jobs: [],
   results: [],
+  draftReviews: [],
+  draftReviewVersions: [],
+  draftResults: [],
+  scriptDrafts: [],
 });

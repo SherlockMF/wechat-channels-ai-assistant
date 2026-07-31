@@ -119,6 +119,9 @@ export async function savePrivateVideo(
       ? new Date(file.lastModified).toISOString()
       : null,
     ...metadata,
+    coverPath: null,
+    coverSource: null,
+    coverFrameSecond: null,
   };
 }
 
@@ -150,22 +153,22 @@ export function verifyAssetSignature(
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export async function servePrivateVideo(
+export async function servePrivateFile(
   request: Request,
-  asset: VideoAsset,
+  filePath: string,
+  mimeType: string,
+  downloadName: string,
 ): Promise<Response> {
   try {
-    const stat = await fs.stat(asset.storagePath);
-    const rangeHeader = request.headers.get("range");
+    const stat = await fs.stat(filePath);
     const commonHeaders = {
-      "Content-Type": asset.mimeType,
+      "Content-Type": mimeType,
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, max-age=60",
-      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(
-        asset.originalFilename,
-      )}`,
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
       "X-Content-Type-Options": "nosniff",
     };
+    const rangeHeader = request.headers.get("range");
     if (rangeHeader) {
       const match = /^bytes=(\d*)-(\d*)$/u.exec(rangeHeader.trim());
       if (!match) {
@@ -191,7 +194,7 @@ export async function servePrivateVideo(
         });
       }
       const stream = Readable.toWeb(
-        createReadStream(asset.storagePath, { start, end }),
+        createReadStream(filePath, { start, end }),
       ) as ReadableStream;
       return new Response(stream, {
         status: 206,
@@ -202,9 +205,7 @@ export async function servePrivateVideo(
         },
       });
     }
-    const stream = Readable.toWeb(
-      createReadStream(asset.storagePath),
-    ) as ReadableStream;
+    const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream;
     return new Response(stream, {
       headers: {
         ...commonHeaders,
@@ -214,4 +215,16 @@ export async function servePrivateVideo(
   } catch {
     return Response.json({ error: "文件已被清理或不可读" }, { status: 404 });
   }
+}
+
+export async function servePrivateVideo(
+  request: Request,
+  asset: VideoAsset,
+): Promise<Response> {
+  return servePrivateFile(
+    request,
+    asset.storagePath,
+    asset.mimeType,
+    asset.originalFilename,
+  );
 }

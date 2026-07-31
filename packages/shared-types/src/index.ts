@@ -155,6 +155,25 @@ export const diagnosisResultSchema = z.object({
     subtitleVersion: z.string(),
     cta: z.string(),
   }),
+  copyAndSubtitleReview: z.object({
+    copyRationality: z.string(),
+    copyProfessionalism: z.string(),
+    subtitleRationality: z.string(),
+    subtitleProfessionalism: z.string(),
+    issues: z.array(z.string()).min(1),
+    revisionPoints: z.array(z.string()).min(1),
+  }),
+  titleSuggestions: z
+    .array(
+      z.object({
+        title: z.string(),
+        rationale: z.string(),
+        expectedEffect: z.string(),
+        basedOnSimilarTitles: z.array(z.string()).default([]),
+      }),
+    )
+    .min(2)
+    .max(5),
   audioSuggestions: z.object({
     currentIssues: z.array(z.string()),
     musicMood: z.string(),
@@ -199,6 +218,8 @@ export interface ImportedVideoRecord {
   contactAddUsers: number | null;
 }
 
+export type CoverSource = "uploaded" | "frame";
+
 export interface VideoAsset {
   id: string;
   importId: string;
@@ -213,6 +234,9 @@ export interface VideoAsset {
   height: number | null;
   fps: number | null;
   processingStatus: string;
+  coverPath: string | null;
+  coverSource: CoverSource | null;
+  coverFrameSecond: number | null;
 }
 
 export interface VideoMatch {
@@ -228,4 +252,210 @@ export interface VideoMatch {
     description: string;
     score: number;
   }>;
+}
+
+export const draftReviewStatusSchema = z.enum([
+  "uploaded",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+export type DraftReviewStatus = z.infer<typeof draftReviewStatusSchema>;
+
+export const DRAFT_REVIEW_MAX_VERSIONS = 5;
+
+export interface DraftReviewChangelogItem {
+  category: DiagnosisResult["primaryProblems"][number]["category"];
+  summary: string;
+  startSecond?: number;
+  endSecond?: number;
+}
+
+export interface DraftReviewChangelog {
+  improved: DraftReviewChangelogItem[];
+  remaining: DraftReviewChangelogItem[];
+  newIssues: DraftReviewChangelogItem[];
+}
+
+/** 审片会话下的单个视频版本 */
+export interface DraftReviewVersion {
+  id: string;
+  draftReviewId: string;
+  versionNumber: number;
+  originalFilename: string;
+  storagePath: string;
+  mimeType: string;
+  fileSize: number;
+  durationSeconds: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  coverPath: string | null;
+  coverSource: CoverSource | null;
+  coverFrameSecond: number | null;
+  evidencePath: string | null;
+  status: DraftReviewStatus;
+  progress: number;
+  currentStep: string;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface DraftReview {
+  id: string;
+  ownerId: string;
+  title: string | null;
+  goal: string | null;
+  /** 用于检索历史相似视频并生成标题建议，如「软水」「装修避坑」 */
+  tags: string[];
+  /** 当前活跃版本；旧数据可能缺失，读取时会迁移 */
+  currentVersionId: string | null;
+  /** 版本数量缓存，便于列表展示 */
+  versionCount: number;
+  originalFilename: string;
+  storagePath: string;
+  mimeType: string;
+  fileSize: number;
+  durationSeconds: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  coverPath: string | null;
+  coverSource: CoverSource | null;
+  coverFrameSecond: number | null;
+  evidencePath: string | null;
+  baselineImportId: string | null;
+  status: DraftReviewStatus;
+  progress: number;
+  currentStep: string;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface DraftReviewResult {
+  id: string;
+  draftReviewId: string;
+  /** 所属版本；旧数据可能缺失，读取时挂到 v1 */
+  draftReviewVersionId: string;
+  result: DiagnosisResult;
+  editedMarkdown: string | null;
+  provider: string;
+  changelog: DraftReviewChangelog | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const scriptDraftFormatSchema = z.enum([
+  "koubo",
+  "showroom_koubo",
+  "service_intro",
+  "project_finish",
+  "hydro_site",
+  "service_process",
+  "vlog",
+]);
+
+export const scriptDraftTopicSchema = z.enum([
+  "smart_home",
+  "water",
+  "hydro",
+  "service",
+]);
+
+export const scriptDraftSmartSubTopicSchema = z.enum([
+  "lighting",
+  "curtain",
+  "theater",
+  "voice",
+  "panel",
+  "security",
+  "scene",
+]);
+
+export const scriptDraftProcessKindSchema = z.enum([
+  "plan_meeting",
+  "install_inspect",
+  "progress_check",
+]);
+
+export const scriptDraftStatusSchema = z.enum(["draft", "ready"]);
+export const scriptDraftPipelineSchema = z.enum(["koubo", "follow"]);
+
+export const scriptDraftInputSchema = z.object({
+  idea: z.string().min(1),
+  /** 已写好的口播/分镜稿；有则优先润色与配素材，少重写 */
+  existingScript: z.string().optional(),
+  sellingPoints: z.string().optional(),
+  targetSeconds: z.number().int().positive().optional(),
+  tone: z.enum(["casual", "dry"]).optional(),
+  projectType: z.string().optional(),
+  shotNotes: z.string().optional(),
+  highlight: z.string().optional(),
+  siteNotes: z.string().optional(),
+  standardPoints: z.string().optional(),
+  processKinds: z.array(scriptDraftProcessKindSchema).optional(),
+  clientScene: z.string().optional(),
+  mustShoot: z.string().optional(),
+  dayPlan: z.string().optional(),
+  internalNote: z.string().optional(),
+});
+
+export const scriptDraftOutputSchema = z.object({
+  pipeline: scriptDraftPipelineSchema,
+  titles: z.array(z.string()),
+  tags: z.array(z.string()),
+  script: z.string(),
+  brollCues: z.array(
+    z.object({
+      section: z.string(),
+      cue: z.string(),
+    }),
+  ),
+  subtitleBeats: z.array(z.string()),
+  altHooks: z.array(z.string()),
+  positioning: z.string().nullable(),
+  timeline: z.array(
+    z.object({
+      order: z.number().int(),
+      shoot: z.string(),
+      say: z.string(),
+      subtitle: z.string(),
+    }),
+  ),
+  gapsOrWarnings: z.array(z.string()),
+  plainText: z.string(),
+});
+
+export type ScriptDraftFormat = z.infer<typeof scriptDraftFormatSchema>;
+export type ScriptDraftTopic = z.infer<typeof scriptDraftTopicSchema>;
+export type ScriptDraftSmartSubTopic = z.infer<
+  typeof scriptDraftSmartSubTopicSchema
+>;
+export type ScriptDraftProcessKind = z.infer<
+  typeof scriptDraftProcessKindSchema
+>;
+export type ScriptDraftStatus = z.infer<typeof scriptDraftStatusSchema>;
+export type ScriptDraftPipeline = z.infer<typeof scriptDraftPipelineSchema>;
+export type ScriptDraftInput = z.infer<typeof scriptDraftInputSchema>;
+export type ScriptDraftOutput = z.infer<typeof scriptDraftOutputSchema>;
+
+export interface ScriptDraft {
+  id: string;
+  ownerId: string;
+  format: ScriptDraftFormat;
+  topic: ScriptDraftTopic | null;
+  subTopics: ScriptDraftSmartSubTopic[];
+  processKinds: ScriptDraftProcessKind[];
+  title: string | null;
+  ideaSummary: string;
+  input: ScriptDraftInput;
+  output: ScriptDraftOutput | null;
+  status: ScriptDraftStatus;
+  provider: string | null;
+  referenceVideoIds: string[];
+  createdAt: string;
+  updatedAt: string;
 }

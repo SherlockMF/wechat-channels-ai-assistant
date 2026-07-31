@@ -1,5 +1,12 @@
 import path from "node:path";
+import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
+
+// 优先加载仓库根目录 .env（monorepo），再加载 apps/web/.env
+const appDir = process.cwd();
+const repoRoot = path.resolve(appDir, "../..");
+loadEnvConfig(repoRoot);
+loadEnvConfig(appDir);
 
 const localAliases = {
   "@/lib/data/repository": "./lib/data/local-runtime-repository.ts",

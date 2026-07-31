@@ -189,6 +189,9 @@ export async function buildLocalSourceState(): Promise<LocalSourceSnapshot> {
     height: null,
     fps: null,
     processingStatus: "source_ready",
+    coverPath: null,
+    coverSource: null,
+    coverFrameSecond: null,
   }));
   const assetByFilename = new Map(
     assets.map((asset) => [asset.originalFilename, asset]),
@@ -256,6 +259,10 @@ export async function buildLocalSourceState(): Promise<LocalSourceSnapshot> {
       matches,
       jobs: [],
       results: [],
+      draftReviews: [],
+      draftReviewVersions: [],
+      draftResults: [],
+      scriptDrafts: [],
     },
     fingerprint,
     paths,

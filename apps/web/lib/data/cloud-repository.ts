@@ -1,5 +1,8 @@
 import type {
+  DraftReview,
+  DraftReviewResult,
   ImportedVideoRecord,
+  ScriptDraft,
   VideoAsset,
   VideoMatch,
 } from "@video-diagnosis/shared-types";
@@ -41,6 +44,10 @@ const collections: CollectionName[] = [
   "matches",
   "jobs",
   "results",
+  "draftReviews",
+  "draftReviewVersions",
+  "draftResults",
+  "scriptDrafts",
 ];
 let mutationQueue = Promise.resolve();
 let schemaReady: Promise<void> | null = null;
@@ -82,15 +89,41 @@ async function readCollection<K extends CollectionName>(
 }
 
 async function readState(): Promise<AppState> {
-  const [imports, records, assets, matches, jobs, results] = await Promise.all([
+  const [
+    imports,
+    records,
+    assets,
+    matches,
+    jobs,
+    results,
+    draftReviews,
+    draftReviewVersions,
+    draftResults,
+    scriptDrafts,
+  ] = await Promise.all([
     readCollection("imports"),
     readCollection("records"),
     readCollection("assets"),
     readCollection("matches"),
     readCollection("jobs"),
     readCollection("results"),
+    readCollection("draftReviews"),
+    readCollection("draftReviewVersions"),
+    readCollection("draftResults"),
+    readCollection("scriptDrafts"),
   ]);
-  return { imports, records, assets, matches, jobs, results };
+  return {
+    imports,
+    records,
+    assets,
+    matches,
+    jobs,
+    results,
+    draftReviews,
+    draftReviewVersions,
+    draftResults,
+    scriptDrafts,
+  };
 }
 
 async function replaceCollection<K extends CollectionName>(
@@ -439,6 +472,187 @@ export class CloudRepository {
         video.analysisMode,
       )
     );
+  }
+
+  async updateAssetCover(
+    _ownerId: string,
+    _assetId: string,
+    _cover: {
+      coverPath: string;
+      coverSource: "uploaded" | "frame";
+      coverFrameSecond: number | null;
+    },
+  ) {
+    this.draftReviewUnsupported();
+  }
+
+  private draftReviewUnsupported(): never {
+    throw new Error("发布前审片当前仅支持 LOCAL 模式");
+  }
+
+  async listDraftReviews(_ownerId: string): Promise<DraftReview[]> {
+    this.draftReviewUnsupported();
+  }
+
+  async getDraftReview(
+    _ownerId: string,
+    _draftReviewId: string,
+    _options?: { versionId?: string | null },
+  ): Promise<{
+    draft: DraftReview;
+    result: DraftReviewResult | null;
+    versions: Array<{
+      id: string;
+      versionNumber: number;
+      status: DraftReview["status"];
+      createdAt: string;
+      completedAt: string | null;
+      originalFilename: string;
+    }>;
+    viewingVersionId: string | null;
+    baseline: ReturnType<typeof calculateAccountBaseline>;
+    analysisMode: "draft_mock" | "draft_provider" | "draft_dashscope";
+  } | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async createDraftReview(
+    _ownerId: string,
+    _draft: DraftReview,
+  ): Promise<DraftReview> {
+    this.draftReviewUnsupported();
+  }
+
+  async addDraftReviewVersion(
+    _ownerId: string,
+    _draftReviewId: string,
+    _version: import("@video-diagnosis/shared-types").DraftReviewVersion,
+    _meta?: { title?: string | null; goal?: string | null; tags?: string[] },
+  ): Promise<DraftReview | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async updateDraftReview(
+    _ownerId: string,
+    _draftReviewId: string,
+    _patch: Partial<DraftReview>,
+  ): Promise<DraftReview | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async updateDraftReviewVersion(
+    _ownerId: string,
+    _draftReviewId: string,
+    _versionId: string,
+    _patch: Partial<import("@video-diagnosis/shared-types").DraftReviewVersion>,
+  ) {
+    this.draftReviewUnsupported();
+  }
+
+  async deleteDraftReview(
+    _ownerId: string,
+    _draftReviewId: string,
+  ): Promise<boolean> {
+    this.draftReviewUnsupported();
+  }
+
+  async deleteDraftReviewVersion(
+    _ownerId: string,
+    _draftReviewId: string,
+    _versionId: string,
+  ): Promise<DraftReview | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async saveDraftReviewResult(
+    _ownerId: string,
+    _draftReviewId: string,
+    _result: DraftReviewResult,
+  ): Promise<DraftReviewResult | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async processDraftReview(
+    _ownerId: string,
+    _draftReviewId: string,
+    _versionId?: string,
+  ): Promise<DraftReview | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async saveDraftEditedReport(
+    _ownerId: string,
+    _draftReviewId: string,
+    _markdown: string,
+    _versionId?: string,
+  ): Promise<DraftReviewResult | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async draftReportMarkdown(
+    _ownerId: string,
+    _draftReviewId: string,
+    _versionId?: string,
+  ): Promise<string | null> {
+    this.draftReviewUnsupported();
+  }
+
+  private scriptWorkbenchUnsupported(): never {
+    throw new Error("脚本工作台当前仅支持 LOCAL 模式");
+  }
+
+  async listScriptDrafts(_ownerId: string): Promise<ScriptDraft[]> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async getScriptDraft(
+    _ownerId: string,
+    _scriptId: string,
+  ): Promise<ScriptDraft | null> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async createScriptDraft(
+    _ownerId: string,
+    _draft: ScriptDraft,
+  ): Promise<ScriptDraft> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async updateScriptDraft(
+    _ownerId: string,
+    _scriptId: string,
+    _patch: Partial<ScriptDraft>,
+  ): Promise<ScriptDraft | null> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async deleteScriptDraft(
+    _ownerId: string,
+    _scriptId: string,
+  ): Promise<boolean> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async generateScriptDraft(
+    _ownerId: string,
+    _params: {
+      format: ScriptDraft["format"];
+      topic?: ScriptDraft["topic"];
+      subTopics?: ScriptDraft["subTopics"];
+      processKinds?: ScriptDraft["processKinds"];
+      input: ScriptDraft["input"];
+      title?: string | null;
+    },
+  ): Promise<ScriptDraft> {
+    this.scriptWorkbenchUnsupported();
+  }
+
+  async regenerateScriptDraft(
+    _ownerId: string,
+    _scriptId: string,
+  ): Promise<ScriptDraft> {
+    this.scriptWorkbenchUnsupported();
   }
 }
 
