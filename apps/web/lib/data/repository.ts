@@ -1,7 +1,8 @@
 import { CloudRepository } from "@/lib/data/cloud-repository";
+import { ownerIdFromRequest } from "@/lib/data/owner";
 
 export const repository = new CloudRepository();
 
 export function requestOwnerId(request: Request): string {
-  return request.headers.get("x-owner-id")?.trim() || "local-user";
+  return ownerIdFromRequest(request);
 }

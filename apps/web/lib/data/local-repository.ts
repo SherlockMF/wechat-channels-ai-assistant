@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+  DraftCoverBrief,
   DraftReview,
   DraftReviewResult,
   DraftReviewVersion,
@@ -26,6 +27,8 @@ import { buildRuleDiagnosis } from "@/lib/analysis/rules";
 import { diagnosisToMarkdown } from "@/lib/analysis/markdown";
 import { selectPreferredAnalysisJob } from "@/lib/data/job-selection";
 import { buildVersionChangelog } from "@/lib/draft-review/changelog";
+import { resolveCoverBriefProvider } from "@/lib/draft-review/cover-brief-dashscope";
+import type { CoverBriefContext } from "@/lib/draft-review/cover-brief-provider";
 import { extractDraftEvidence } from "@/lib/draft-review/evidence";
 import { resolveDraftReviewProvider } from "@/lib/draft-review/provider";
 import { findSimilarVideosByTags } from "@/lib/draft-review/similar-videos";
@@ -108,6 +111,7 @@ async function readState(): Promise<PersistedLocalState> {
         draftReviews: persisted.draftReviews ?? [],
         draftReviewVersions: persisted.draftReviewVersions ?? [],
         draftResults: persisted.draftResults ?? [],
+        draftCoverBriefs: persisted.draftCoverBriefs ?? [],
         scriptDrafts: persisted.scriptDrafts ?? [],
       };
       migrateDraftReviewVersions(cachedState);
@@ -130,6 +134,7 @@ async function readState(): Promise<PersistedLocalState> {
       draftReviews: persisted.draftReviews ?? [],
       draftReviewVersions: persisted.draftReviewVersions ?? [],
       draftResults: persisted.draftResults ?? [],
+      draftCoverBriefs: persisted.draftCoverBriefs ?? [],
       scriptDrafts: persisted.scriptDrafts ?? [],
       sourceFingerprint: source.fingerprint,
     };
@@ -161,6 +166,14 @@ async function mutate<T>(operation: (state: AppState) => T | Promise<T>): Promis
   });
   await mutationQueue;
   return result;
+}
+
+function normalizeScriptDraft(draft: ScriptDraft): ScriptDraft {
+  return {
+    ...draft,
+    formatOther: draft.formatOther ?? null,
+    topicOther: draft.topicOther ?? null,
+  };
 }
 
 export class LocalRepository {
@@ -246,6 +259,27 @@ export class LocalRepository {
     matches: VideoMatch[],
   ) {
     return mutate((state) => {
+      const ownedImportIds = new Set(
+        state.imports
+          .filter((item) => item.ownerId === ownerId)
+          .map((item) => item.id),
+      );
+      if (assets.some((asset) => !ownedImportIds.has(asset.importId))) {
+        throw Object.assign(new Error("不能向其他用户的导入批次添加视频"), {
+          status: 403,
+        });
+      }
+      const uploadedAssets = new Map(assets.map((asset) => [asset.id, asset]));
+      const invalidMatch = matches.some((match) => {
+        const asset = uploadedAssets.get(match.videoAssetId);
+        if (!asset) return true;
+        if (!match.videoRecordId) return false;
+        const record = state.records.find((item) => item.id === match.videoRecordId);
+        return !record || record.importId !== asset.importId;
+      });
+      if (invalidMatch) {
+        throw Object.assign(new Error("视频匹配不能跨导入批次"), { status: 403 });
+      }
       state.assets.push(...assets);
       state.matches.push(...matches);
       return {
@@ -290,9 +324,15 @@ export class LocalRepository {
         ? state.assets.find((item) => item.id === match.videoAssetId)
         : null;
       if (!match || !asset) return null;
+      const entry = state.imports.find(
+        (item) => item.id === asset.importId && item.ownerId === ownerId,
+      );
+      if (!entry) return null;
       if (
         videoRecordId &&
-        !state.records.some((record) => record.id === videoRecordId)
+        !state.records.some(
+          (record) => record.id === videoRecordId && record.importId === asset.importId,
+        )
       ) {
         return null;
       }
@@ -339,10 +379,18 @@ export class LocalRepository {
     videoRecordIds: string[],
   ): Promise<AnalysisJob[]> {
     return mutate((state) => {
-      const records = sortByPublishedAt(
-        state.records.filter((record) => videoRecordIds.includes(record.id)),
+      const ownedImportIds = new Set(
+        state.imports
+          .filter((item) => item.ownerId === ownerId)
+          .map((item) => item.id),
       );
-      const baseline = calculateAccountBaseline(state.records);
+      const ownerRecords = state.records.filter((record) =>
+        ownedImportIds.has(record.importId),
+      );
+      const records = sortByPublishedAt(
+        ownerRecords.filter((record) => videoRecordIds.includes(record.id)),
+      );
+      const baseline = calculateAccountBaseline(ownerRecords);
       const jobs = records.flatMap((record) => {
         const match = state.matches.find(
           (item) =>
@@ -372,7 +420,15 @@ export class LocalRepository {
         state.results.push({
           id: createId(),
           analysisJobId: job.id,
-          result: buildRuleDiagnosis(record, baseline, asset.durationSeconds),
+          result: buildRuleDiagnosis(
+            record,
+            baseline,
+            asset.durationSeconds,
+            findSimilarVideosByTags(
+              ownerRecords.filter((item) => item.id !== record.id),
+              { tags: [], title: record.description },
+            ),
+          ),
           editedMarkdown: null,
           createdAt: now,
           updatedAt: now,
@@ -397,11 +453,26 @@ export class LocalRepository {
       );
       const asset = state.assets.find((item) => item.id === job.videoAssetId);
       if (!record || !asset) return null;
+      const ownedImportIds = new Set(
+        state.imports
+          .filter((item) => item.ownerId === ownerId)
+          .map((item) => item.id),
+      );
+      if (!ownedImportIds.has(record.importId) || !ownedImportIds.has(asset.importId)) {
+        return null;
+      }
+      const ownerRecords = state.records.filter((item) =>
+        ownedImportIds.has(item.importId),
+      );
       const now = new Date().toISOString();
       const diagnosis = buildRuleDiagnosis(
         record,
-        calculateAccountBaseline(state.records),
+        calculateAccountBaseline(ownerRecords),
         asset.durationSeconds,
+        findSimilarVideosByTags(
+          ownerRecords.filter((item) => item.id !== record.id),
+          { tags: [], title: record.description },
+        ),
       );
       const result = state.results.find(
         (item) => item.analysisJobId === job.id,
@@ -740,6 +811,9 @@ export class LocalRepository {
       state.draftResults = state.draftResults.filter(
         (item) => item.draftReviewId !== draftReviewId,
       );
+      state.draftCoverBriefs = (state.draftCoverBriefs ?? []).filter(
+        (item) => item.draftReviewId !== draftReviewId,
+      );
       return true;
     });
     if (!removed) return false;
@@ -788,6 +862,9 @@ export class LocalRepository {
       state.draftResults = state.draftResults.filter(
         (item) => item.draftReviewVersionId !== versionId,
       );
+      state.draftCoverBriefs = (state.draftCoverBriefs ?? []).filter(
+        (item) => item.versionId !== versionId,
+      );
       const remaining = state.draftReviewVersions
         .filter((item) => item.draftReviewId === draftReviewId)
         .sort((a, b) => a.versionNumber - b.versionNumber);
@@ -803,6 +880,37 @@ export class LocalRepository {
       }
     }
     return draft;
+  }
+
+  async deleteDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<boolean> {
+    let backgroundPath: string | null = null;
+    const removed = await mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return false;
+      const briefs = state.draftCoverBriefs ?? [];
+      const brief = briefs.find(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      );
+      if (!brief) return false;
+      backgroundPath = brief.backgroundPath;
+      state.draftCoverBriefs = briefs.filter((item) => item.id !== briefId);
+      return true;
+    });
+    if (!removed) return false;
+    if (backgroundPath) {
+      try {
+        await fs.rm(path.dirname(backgroundPath), { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+    return true;
   }
 
   async saveDraftReviewResult(
@@ -929,7 +1037,7 @@ export class LocalRepository {
         draftReviewVersionId: targetVersionId,
         result: diagnosis,
         editedMarkdown: null,
-        provider: provider.name,
+        provider: provider.resultProviderName ?? provider.name,
         changelog,
         createdAt: now,
         updatedAt: now,
@@ -996,10 +1104,132 @@ export class LocalRepository {
     );
   }
 
+  async listDraftCoverBriefs(
+    ownerId: string,
+    draftReviewId: string,
+  ): Promise<DraftCoverBrief[]> {
+    const state = await readState();
+    const draft = state.draftReviews.find(
+      (item) => item.id === draftReviewId && item.ownerId === ownerId,
+    );
+    if (!draft) return [];
+    return (state.draftCoverBriefs ?? [])
+      .filter((item) => item.draftReviewId === draftReviewId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<DraftCoverBrief | null> {
+    const state = await readState();
+    const draft = state.draftReviews.find(
+      (item) => item.id === draftReviewId && item.ownerId === ownerId,
+    );
+    if (!draft) return null;
+    return (
+      (state.draftCoverBriefs ?? []).find(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      ) ?? null
+    );
+  }
+
+  async createDraftCoverBrief(
+    ownerId: string,
+    brief: DraftCoverBrief,
+  ): Promise<DraftCoverBrief | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === brief.draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      if (!state.draftCoverBriefs) state.draftCoverBriefs = [];
+      state.draftCoverBriefs.push(brief);
+      return brief;
+    });
+  }
+
+  async updateDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+    patch: Partial<DraftCoverBrief>,
+  ): Promise<DraftCoverBrief | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      const brief = (state.draftCoverBriefs ?? []).find(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      );
+      if (!draft || !brief) return null;
+      Object.assign(brief, patch);
+      return brief;
+    });
+  }
+
+  async processDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<DraftCoverBrief | null> {
+    const brief = await this.getDraftCoverBrief(ownerId, draftReviewId, briefId);
+    if (!brief) return null;
+    const payload = await this.getDraftReview(ownerId, draftReviewId, {
+      versionId: brief.versionId,
+    });
+    if (!payload) return null;
+
+    const context: CoverBriefContext = {
+      title: payload.draft.title,
+      tags: payload.draft.tags ?? [],
+      goal: payload.draft.goal,
+      diagnosisSummary: payload.result?.result.executiveSummary ?? null,
+      problemCategories: (payload.result?.result.primaryProblems ?? []).map(
+        (item) => item.category,
+      ),
+    };
+
+    await this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+      status: "processing",
+      errorMessage: null,
+    });
+
+    try {
+      const provider = resolveCoverBriefProvider();
+      const output = await provider.generate({
+        backgroundPath: brief.backgroundPath,
+        backgroundMimeType: brief.backgroundMimeType,
+        userDescription: brief.userDescription,
+        context,
+        options: brief.options ?? null,
+      });
+      const now = new Date().toISOString();
+      return this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+        imagePrompt: output.pastePrompt,
+        titles: output.titles,
+        layoutNotes: null,
+        provider: provider.name,
+        status: "completed",
+        errorMessage: null,
+        completedAt: now,
+      });
+    } catch (error) {
+      return this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+        status: "failed",
+        errorMessage:
+          error instanceof Error ? error.message : "封面方案生成失败",
+        completedAt: new Date().toISOString(),
+      });
+    }
+  }
+
   async listScriptDrafts(ownerId: string): Promise<ScriptDraft[]> {
     const state = await readState();
     return (state.scriptDrafts ?? [])
       .filter((item) => item.ownerId === ownerId)
+      .map(normalizeScriptDraft)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -1008,11 +1238,10 @@ export class LocalRepository {
     scriptId: string,
   ): Promise<ScriptDraft | null> {
     const state = await readState();
-    return (
-      (state.scriptDrafts ?? []).find(
-        (item) => item.id === scriptId && item.ownerId === ownerId,
-      ) ?? null
+    const draft = (state.scriptDrafts ?? []).find(
+      (item) => item.id === scriptId && item.ownerId === ownerId,
     );
+    return draft ? normalizeScriptDraft(draft) : null;
   }
 
   async createScriptDraft(
@@ -1106,6 +1335,8 @@ export class LocalRepository {
       ownerId,
       format: params.format,
       topic,
+      formatOther: params.input.formatOther?.trim() || null,
+      topicOther: params.input.topicOther?.trim() || null,
       subTopics: params.subTopics ?? [],
       processKinds: params.processKinds ?? [],
       title: null,
@@ -1113,7 +1344,7 @@ export class LocalRepository {
       input: params.input,
       output,
       status: "ready",
-      provider: provider.name,
+      provider: provider.resultProviderName ?? provider.name,
       referenceVideoIds: refs.map((item) => item.videoRecordId),
       createdAt: now,
       updatedAt: now,

@@ -8,6 +8,7 @@ import {
   Gauge,
   PlayCircle,
   Scissors,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import type {
@@ -20,6 +21,7 @@ import { DRAFT_REVIEW_MAX_VERSIONS } from "@video-diagnosis/shared-types";
 import type { AccountBaseline } from "@/lib/metrics/account";
 import { Badge, Button, Card, EmptyState, Progress } from "@/components/ui";
 import { CoverFramePicker } from "@/features/covers/cover-frame-picker";
+import { DraftCoverBriefPanel } from "@/features/draft-review/draft-cover-brief-panel";
 
 const categoryLabel: Record<string, string> = {
   hook: "开头钩子",
@@ -74,6 +76,7 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
   const [uploadGoal, setUploadGoal] = useState("");
   const [uploadTags, setUploadTags] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
+  const [deletingVersionId, setDeletingVersionId] = useState("");
   const player = useRef<HTMLVideoElement>(null);
 
   async function load(nextVersionId?: string | null) {
@@ -152,6 +155,33 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
     }
   }
 
+  async function deleteVersion(item: VersionSummary) {
+    const count = payload?.versions?.length ?? 0;
+    if (count <= 1) {
+      setError("至少保留一个版本；删除整条审片请从列表操作");
+      return;
+    }
+    if (!window.confirm(`删除 v${item.versionNumber}？诊断结果将一并移除。`)) {
+      return;
+    }
+    setDeletingVersionId(item.id);
+    try {
+      const response = await fetch(
+        `/api/draft-reviews/${draftReviewId}/versions/${item.id}`,
+        { method: "DELETE" },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "删除版本失败");
+      await load(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : "删除版本失败",
+      );
+    } finally {
+      setDeletingVersionId("");
+    }
+  }
+
   if (!payload) {
     return error ? (
       <Card className="p-6">
@@ -175,6 +205,11 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
 
   return (
     <div className="space-y-4">
+      {error ? (
+        <p className="rounded-xl border border-[#edc2bc] bg-[#fff3f1] px-4 py-3 text-sm text-[#9f4035]">
+          {error}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {versions.map((item) => {
@@ -182,20 +217,45 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
             const latest =
               item.versionNumber ===
               Math.max(...versions.map((row) => row.versionNumber));
+            const canDelete = versions.length > 1;
             return (
-              <button
+              <div
                 key={item.id}
-                type="button"
-                onClick={() => void load(item.id)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-bold transition ${
+                className={`inline-flex items-center overflow-hidden rounded-lg text-sm font-bold ${
                   active
                     ? "bg-pine text-white"
-                    : "bg-fog text-[#52615a] hover:bg-[#e4ebe6]"
+                    : "bg-fog text-[#52615a]"
                 }`}
               >
-                v{item.versionNumber}
-                {latest ? " · 最新" : ""}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => void load(item.id)}
+                  className={`px-3 py-1.5 transition ${
+                    active ? "hover:bg-pine/90" : "hover:bg-[#e4ebe6]"
+                  }`}
+                >
+                  v{item.versionNumber}
+                  {latest ? " · 最新" : ""}
+                </button>
+                {canDelete ? (
+                  <button
+                    type="button"
+                    title={`删除 v${item.versionNumber}`}
+                    disabled={deletingVersionId === item.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteVersion(item);
+                    }}
+                    className={`border-l px-2 py-1.5 transition ${
+                      active
+                        ? "border-white/25 hover:bg-white/15"
+                        : "border-line hover:bg-[#fdeceb] hover:text-coral"
+                    }`}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                ) : null}
+              </div>
             );
           })}
         </div>
@@ -335,6 +395,13 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                 改选封面帧
               </Button>
             )}
+            <div className="mt-4 border-t border-line pt-4">
+              <DraftCoverBriefPanel
+                draftReviewId={draftReviewId}
+                versionId={payload.viewingVersionId}
+                compact
+              />
+            </div>
           </div>
         </Card>
 

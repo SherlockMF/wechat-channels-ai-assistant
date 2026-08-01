@@ -4,6 +4,7 @@ import type {
 } from "@video-diagnosis/shared-types";
 import type { AccountBaseline } from "@/lib/metrics/account";
 import { safeRate, sampleConfidence } from "@/lib/metrics/account";
+import type { SimilarVideoSummary } from "@/lib/draft-review/similar-videos";
 
 function percent(value: number | null): string {
   return value === null ? "暂无" : `${(value * 100).toFixed(2)}%`;
@@ -24,6 +25,7 @@ export function buildRuleDiagnosis(
   record: ImportedVideoRecord,
   baseline: AccountBaseline,
   durationSeconds: number | null,
+  similarVideos: SimilarVideoSummary[] = [],
 ): DiagnosisResult {
   const confidence = sampleConfidence(record.views, baseline);
   const facts = [
@@ -48,6 +50,14 @@ export function buildRuleDiagnosis(
     baseline.all.completionRate?.q2 !== undefined &&
     record.completionRate < baseline.all.completionRate.q2;
   const duration = durationSeconds ?? Math.max(10, record.averageWatchSeconds ?? 30);
+  const sourceTitle = record.description.trim() || "这条视频";
+  const similarTitles = similarVideos
+    .map((item) => item.description.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const referenceRationale = similarTitles.length
+    ? `参考 ${similarTitles.length} 条标题相近的历史视频，`
+    : "未找到足够相似的历史视频，仅根据当前标题结构";
   const windows = [
     [0, Math.min(3, duration)],
     [Math.min(3, duration), Math.min(8, duration)],
@@ -188,10 +198,51 @@ export function buildRuleDiagnosis(
     copySuggestions: {
       originalSummary: record.description,
       revisedFullScript:
-        "结果或痛点先行；3 秒内说明对象与收益；随后给出方法和证据；结尾只保留一个行动指令。",
+        "结果或痛点先行；3 秒内说明对象与收益；主张必须可验证；专有名词后跟白话；随后给出方法和证据；结尾只保留一个行动指令。",
       subtitleVersion: "结果先行｜适用场景｜核心方法｜证据｜单一 CTA",
       cta: "收藏这份清单，准备装修时逐项核对。",
     },
+    copyAndSubtitleReview: {
+      copyRationality: weakCompletion
+        ? "完播偏低时，优先怀疑开场承诺落空、逻辑跳跃或中段空泛铺垫，而非单纯时长问题。"
+        : "口播主张需与标题一致，并可用画面/数据佐证；避免因果倒置与无法举证的绝对化结论。",
+      copyProfessionalism:
+        "术语克制使用：必要专业词保留并立即白话解释；删除口号堆砌、夸大疗效与空话套话。",
+      subtitleRationality:
+        "字幕应与口播同义对齐；数字、对比结论、适用边界优先上屏，口语填充词不上屏。",
+      subtitleProfessionalism:
+        "短句分行、每屏信息密度适中；错别字、标点混乱与全文粘贴口播会直接损害专业感。",
+      issues: [
+        "需人工核对标题与首句口播是否兑现同一承诺。",
+        "需检查是否存在无法举证的绝对化用语（最好/一定/立刻见效等）。",
+        "需检查字幕是否过长、漏关键数字，或与口播冲突。",
+      ],
+      revisionPoints: [
+        "开场 3 秒内给出可验证结果或痛点，并与标题一致。",
+        "每段只保留一个主张 + 一个证据；专有名词后加白话。",
+        "字幕每屏控制短句，结尾只留一个 CTA。",
+      ],
+    },
+    titleSuggestions: [
+      {
+        title: `${sourceTitle.replace(/[！!？?。．.…]+$/u, "")}｜3 秒说清收益`,
+        rationale: `${referenceRationale}补齐对象与收益，降低点击后落差。`,
+        expectedEffect: "提高首屏承诺一致性，利于完播开局。",
+        basedOnSimilarTitles: similarTitles,
+      },
+      {
+        title: `别再忽略这一点：${sourceTitle.slice(0, 18)}`,
+        rationale: `${referenceRationale}改写为痛点句式，缩短理解路径。`,
+        expectedEffect: "强化问题共鸣，缩短理解成本。",
+        basedOnSimilarTitles: similarTitles,
+      },
+      {
+        title: `${sourceTitle.slice(0, 16)}｜只保留一个行动指令`,
+        rationale: `${referenceRationale}收窄信息并突出可执行动作。`,
+        expectedEffect: "利于关注/私信等单一目标转化。",
+        basedOnSimilarTitles: similarTitles,
+      },
+    ],
     audioSuggestions: {
       currentIssues: ["尚未完成真实音轨分析，不能判断具体静音或削波区间。"],
       musicMood: "克制、清晰、有轻微推进感",
@@ -204,6 +255,7 @@ export function buildRuleDiagnosis(
     limitations: [
       "当前没有逐秒留存数据，不能定位真实流失秒数。",
       "规则诊断不等同于因果结论，时间段需要结合转写、关键帧和人工复核。",
+      "文案与字幕的合理性、专业性评估为结构化启发，发布前仍需人工终审。",
       "修改后效果需通过新视频数据验证，系统不承诺指标一定提升。",
     ],
   };

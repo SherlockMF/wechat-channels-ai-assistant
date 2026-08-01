@@ -241,8 +241,14 @@ async function callDashscopeChat(input: {
 
 export class DashScopeDraftReviewProvider implements DraftReviewProvider {
   readonly name = "dashscope";
+  private actualProviderName = "dashscope";
+
+  get resultProviderName(): string {
+    return this.actualProviderName;
+  }
 
   async analyze(input: DraftReviewProviderInput): Promise<DiagnosisResult> {
+    this.actualProviderName = "dashscope";
     const imagePaths = [
       input.evidence.combinedBoard,
       input.evidence.openingBoard,
@@ -284,6 +290,7 @@ export class DashScopeDraftReviewProvider implements DraftReviewProvider {
       try {
         return diagnosisResultSchema.parse(extractJsonObject(repaired));
       } catch {
+        this.actualProviderName = "mock";
         const fallback = buildDraftDiagnosis(
           input.evidence,
           input.baseline,

@@ -94,6 +94,9 @@ export async function savePrivateVideo(
     height: null,
     fps: null,
     processingStatus: "uploaded",
+    coverPath: null,
+    coverSource: null,
+    coverFrameSecond: null,
   };
   await mediaBucket().put(videoObjectKey(asset), await file.arrayBuffer(), {
     httpMetadata: { contentType: asset.mimeType },

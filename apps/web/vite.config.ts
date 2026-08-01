@@ -60,6 +60,7 @@ export default defineConfig(async () => {
     },
     define: {
       "process.env.SITES_DEPLOYMENT": JSON.stringify("true"),
+      "process.env.NEXT_PUBLIC_SITES_DEPLOYMENT": JSON.stringify("true"),
     },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }

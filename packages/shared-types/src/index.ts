@@ -348,6 +348,49 @@ export interface DraftReviewResult {
   updatedAt: string;
 }
 
+export const draftCoverBriefStatusSchema = z.enum([
+  "processing",
+  "completed",
+  "failed",
+]);
+
+export type DraftCoverBriefStatus = z.infer<typeof draftCoverBriefStatusSchema>;
+
+/** 审片封面方案：一段可连同图片发给 GPT 的完整提示词 */
+export interface DraftCoverBriefOptions {
+  /** 视觉风格，预设或自定义文案 */
+  style: string | null;
+  /** 主题色倾向，预设或自定义文案 */
+  themeColor: string | null;
+  /** 画幅，预设或自定义如 1:1 */
+  aspectRatio: string | null;
+  /** 文案调性，预设或自定义 */
+  mood: string | null;
+  /** 压暗/对比强度，预设或自定义 */
+  overlay: string | null;
+}
+
+export interface DraftCoverBrief {
+  id: string;
+  draftReviewId: string;
+  versionId: string | null;
+  backgroundPath: string;
+  backgroundMimeType: string;
+  userDescription: string;
+  /** 可选控制项；旧数据可能缺失 */
+  options: DraftCoverBriefOptions | null;
+  /** 完整可粘贴提示词（历史字段名 imagePrompt） */
+  imagePrompt: string | null;
+  titles: string[];
+  /** @deprecated 已并入 imagePrompt，不再单独展示 */
+  layoutNotes: string | null;
+  provider: string;
+  status: DraftCoverBriefStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export const scriptDraftFormatSchema = z.enum([
   "koubo",
   "showroom_koubo",
@@ -356,6 +399,7 @@ export const scriptDraftFormatSchema = z.enum([
   "hydro_site",
   "service_process",
   "vlog",
+  "other",
 ]);
 
 export const scriptDraftTopicSchema = z.enum([
@@ -363,6 +407,7 @@ export const scriptDraftTopicSchema = z.enum([
   "water",
   "hydro",
   "service",
+  "other",
 ]);
 
 export const scriptDraftSmartSubTopicSchema = z.enum([
@@ -390,7 +435,10 @@ export const scriptDraftInputSchema = z.object({
   existingScript: z.string().optional(),
   sellingPoints: z.string().optional(),
   targetSeconds: z.number().int().positive().optional(),
-  tone: z.enum(["casual", "dry"]).optional(),
+  tone: z.enum(["casual", "dry", "other"]).optional(),
+  toneOther: z.string().optional(),
+  formatOther: z.string().optional(),
+  topicOther: z.string().optional(),
   projectType: z.string().optional(),
   shotNotes: z.string().optional(),
   highlight: z.string().optional(),
@@ -447,6 +495,10 @@ export interface ScriptDraft {
   ownerId: string;
   format: ScriptDraftFormat;
   topic: ScriptDraftTopic | null;
+  /** format=other 时的自定义形态名称 */
+  formatOther: string | null;
+  /** topic=other 时的自定义主题名称 */
+  topicOther: string | null;
   subTopics: ScriptDraftSmartSubTopic[];
   processKinds: ScriptDraftProcessKind[];
   title: string | null;

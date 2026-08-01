@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseWorkbook } from "@/lib/imports/parser";
+import { parseWorkbook, validateWorkbookFile } from "@/lib/imports/parser";
 
 export const runtime = "nodejs";
 
@@ -10,12 +10,7 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "请选择 Excel 文件" }, { status: 400 });
     }
-    if (!/\.xlsx?$/i.test(file.name)) {
-      return NextResponse.json(
-        { error: "仅支持 .xlsx 或 .xls 文件" },
-        { status: 415 },
-      );
-    }
+    validateWorkbookFile(file);
     const preview = parseWorkbook(await file.arrayBuffer());
     return NextResponse.json({
       filename: file.name,
@@ -29,9 +24,13 @@ export async function POST(request: Request) {
       sample: preview.records.slice(0, 8),
     });
   } catch (error) {
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? Number((error as { status: number }).status)
+        : 422;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Excel 解析失败" },
-      { status: 422 },
+      { status: status === 413 || status === 415 ? status : 422 },
     );
   }
 }

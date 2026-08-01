@@ -748,6 +748,53 @@ export class PostgresRepository {
     this.draftReviewUnsupported();
   }
 
+  async listDraftCoverBriefs(
+    _ownerId: string,
+    _draftReviewId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief[]> {
+    this.draftReviewUnsupported();
+  }
+
+  async getDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async createDraftCoverBrief(
+    _ownerId: string,
+    _brief: import("@video-diagnosis/shared-types").DraftCoverBrief,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async updateDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+    _patch: Partial<import("@video-diagnosis/shared-types").DraftCoverBrief>,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async processDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async deleteDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<boolean> {
+    this.draftReviewUnsupported();
+  }
+
   private scriptWorkbenchUnsupported(): never {
     throw new Error("脚本工作台当前仅支持 LOCAL 模式");
   }

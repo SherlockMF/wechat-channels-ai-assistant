@@ -11,6 +11,8 @@ import {
 import { AlertCircle, Eye, LockKeyhole, Play, RefreshCw, RotateCcw } from "lucide-react";
 import type { ImportedVideoRecord, VideoAsset } from "@video-diagnosis/shared-types";
 import type { AnalysisJob } from "@/lib/data/types";
+import { normalizeRecentRange } from "@/lib/analysis/recent-range";
+import { SelectWithOther } from "@/components/select-with-other";
 import { Badge, Button, Card, EmptyState, Progress } from "@/components/ui";
 
 interface QueueRow {
@@ -18,6 +20,13 @@ interface QueueRow {
   asset: VideoAsset;
   job: AnalysisJob | null;
 }
+
+const RECENT_OPTIONS = [
+  { value: "5", label: "最近 5 条" },
+  { value: "10", label: "最近 10 条" },
+  { value: "20", label: "最近 20 条" },
+  { value: "all", label: "全部已匹配" },
+] as const;
 
 function readSession(key: string): string | null {
   try {
@@ -51,10 +60,10 @@ function jobStepLabel(step: string): string {
 export function AnalysisQueue({
   initialRecent,
 }: {
-  initialRecent: "5" | "10" | "20" | "all";
+  initialRecent: string;
 }) {
   const [rows, setRows] = useState<QueueRow[]>([]);
-  const [recent, setRecent] = useState<"5" | "10" | "20" | "all">(initialRecent);
+  const [recent, setRecent] = useState(normalizeRecentRange(initialRecent));
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -85,8 +94,8 @@ export function AnalysisQueue({
     const hasUrlRange = new URLSearchParams(window.location.search).has("recent");
     if (!hasUrlRange) {
       const stored = readSession("analysis-recent");
-      if (stored === "5" || stored === "10" || stored === "20" || stored === "all") {
-        setRecent(stored);
+      if (stored) {
+        setRecent(normalizeRecentRange(stored));
       }
     }
     void load();
@@ -94,10 +103,12 @@ export function AnalysisQueue({
     return () => window.clearInterval(timer);
   }, []);
 
-  const visibleRows = useMemo(
-    () => (recent === "all" ? rows : rows.slice(0, Number(recent))),
-    [recent, rows],
-  );
+  const visibleRows = useMemo(() => {
+    if (recent === "all") return rows;
+    const limit = Number(recent);
+    if (!Number.isFinite(limit) || limit <= 0) return rows;
+    return rows.slice(0, limit);
+  }, [recent, rows]);
   const analyzableRows = useMemo(
     () => visibleRows.filter((row) => !row.job),
     [visibleRows],
@@ -131,8 +142,11 @@ export function AnalysisQueue({
     }
   }, [loading, recent, rows.length]);
 
-  function changeRecent(value: typeof recent) {
+  function changeRecent(value: string) {
     setRecent(value);
+    const valid =
+      value === "all" || ( /^\d+$/.test(value) && Number(value) > 0);
+    if (!valid) return;
     setSelected({});
     restoredScroll.current = false;
     writeSession("analysis-recent", value);
@@ -324,17 +338,13 @@ export function AnalysisQueue({
     <Card className="overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-line px-6 py-5 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <select
-            aria-label="视频范围"
+          <SelectWithOther
             value={recent}
-            onChange={(event) => changeRecent(event.target.value as typeof recent)}
-            className="h-10 rounded-lg border border-line bg-white px-3 text-sm font-bold outline-none focus:border-pine"
-          >
-            <option value="5">最近 5 条</option>
-            <option value="10">最近 10 条</option>
-            <option value="20">最近 20 条</option>
-            <option value="all">全部已匹配</option>
-          </select>
+            onChange={changeRecent}
+            options={RECENT_OPTIONS}
+            otherPlaceholder="自定义条数，例如 50"
+            selectClassName="font-bold"
+          />
           <span className="hidden items-center gap-1.5 text-xs text-[#748179] md:flex">
             <LockKeyhole size={13} />
             已有诊断结果受保护

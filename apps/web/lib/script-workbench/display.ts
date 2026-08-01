@@ -110,9 +110,9 @@ export function resolveDraftListTitle(draft: ScriptDraft): string {
     ideaSummary: draft.ideaSummary,
     idea: draft.input?.idea,
     existingScript: draft.input?.existingScript,
-    topicLabel: topicLabel(draft.topic),
+    topicLabel: topicLabel(draft.topic, draft.topicOther),
     subLabels: smartSubTopicLabels(draft.subTopics ?? []),
-    formatLabel: formatLabel(draft.format),
+    formatLabel: formatLabel(draft.format, draft.formatOther),
     outputTitles: draft.output?.titles,
   });
 }
@@ -125,7 +125,7 @@ export function resolveDraftListSubtitle(draft: ScriptDraft): string {
   const title = resolveDraftListTitle(draft);
   if (summary && summary !== title) return summary;
   if (draft.input?.existingScript?.trim()) return "已附当前口播稿";
-  return formatLabel(draft.format);
+  return formatLabel(draft.format, draft.formatOther);
 }
 
 export function sanitizeGeneratedTitles(

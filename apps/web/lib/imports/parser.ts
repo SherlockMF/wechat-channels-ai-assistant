@@ -8,6 +8,20 @@ import {
 
 export const REQUIRED_SHEET = "视频号数据明细";
 
+export function validateWorkbookFile(file: File): void {
+  if (!/\.xlsx?$/iu.test(file.name)) {
+    throw Object.assign(new Error("仅支持 .xlsx 或 .xls 文件"), { status: 415 });
+  }
+  const configuredMb = Number(process.env.MAX_WORKBOOK_FILE_MB ?? 20);
+  const maxMb = Number.isFinite(configuredMb) && configuredMb > 0 ? configuredMb : 20;
+  const maxBytes = maxMb * 1024 * 1024;
+  if (file.size <= 0 || file.size > maxBytes) {
+    throw Object.assign(new Error(`Excel 文件大小必须在 0～${maxMb}MB`), {
+      status: 413,
+    });
+  }
+}
+
 const FIELD_NAMES = [
   "视频描述",
   "视频ID",

@@ -17,6 +17,8 @@ import { calculateAccountBaseline, sortByPublishedAt } from "@/lib/metrics/accou
 import { buildRuleDiagnosis } from "@/lib/analysis/rules";
 import { diagnosisToMarkdown } from "@/lib/analysis/markdown";
 import { selectPreferredAnalysisJob } from "@/lib/data/job-selection";
+import { ownerIdFromRequest } from "@/lib/data/owner";
+import { findSimilarVideosByTags } from "@/lib/draft-review/similar-videos";
 
 interface D1Statement {
   bind(...values: unknown[]): D1Statement;
@@ -47,6 +49,7 @@ const collections: CollectionName[] = [
   "draftReviews",
   "draftReviewVersions",
   "draftResults",
+  "draftCoverBriefs",
   "scriptDrafts",
 ];
 let mutationQueue = Promise.resolve();
@@ -99,6 +102,7 @@ async function readState(): Promise<AppState> {
     draftReviews,
     draftReviewVersions,
     draftResults,
+    draftCoverBriefs,
     scriptDrafts,
   ] = await Promise.all([
     readCollection("imports"),
@@ -110,6 +114,7 @@ async function readState(): Promise<AppState> {
     readCollection("draftReviews"),
     readCollection("draftReviewVersions"),
     readCollection("draftResults"),
+    readCollection("draftCoverBriefs"),
     readCollection("scriptDrafts"),
   ]);
   return {
@@ -122,6 +127,7 @@ async function readState(): Promise<AppState> {
     draftReviews,
     draftReviewVersions,
     draftResults,
+    draftCoverBriefs,
     scriptDrafts,
   };
 }
@@ -272,6 +278,27 @@ export class CloudRepository {
     matches: VideoMatch[],
   ) {
     return mutate((state) => {
+      const ownedImportIds = new Set(
+        state.imports
+          .filter((item) => item.ownerId === ownerId)
+          .map((item) => item.id),
+      );
+      if (assets.some((asset) => !ownedImportIds.has(asset.importId))) {
+        throw Object.assign(new Error("不能向其他用户的导入批次添加视频"), {
+          status: 403,
+        });
+      }
+      const uploadedAssets = new Map(assets.map((asset) => [asset.id, asset]));
+      const invalidMatch = matches.some((match) => {
+        const asset = uploadedAssets.get(match.videoAssetId);
+        if (!asset) return true;
+        if (!match.videoRecordId) return false;
+        const record = state.records.find((item) => item.id === match.videoRecordId);
+        return !record || record.importId !== asset.importId;
+      });
+      if (invalidMatch) {
+        throw Object.assign(new Error("视频匹配不能跨导入批次"), { status: 403 });
+      }
       state.assets.push(...assets);
       state.matches.push(...matches);
       return {
@@ -295,9 +322,15 @@ export class CloudRepository {
         ? state.assets.find((item) => item.id === match.videoAssetId)
         : null;
       if (!match || !asset) return null;
+      const entry = state.imports.find(
+        (item) => item.id === asset.importId && item.ownerId === ownerId,
+      );
+      if (!entry) return null;
       if (
         videoRecordId &&
-        !state.records.some((record) => record.id === videoRecordId)
+        !state.records.some(
+          (record) => record.id === videoRecordId && record.importId === asset.importId,
+        )
       ) {
         return null;
       }
@@ -344,10 +377,18 @@ export class CloudRepository {
     videoRecordIds: string[],
   ): Promise<AnalysisJob[]> {
     return mutate((state) => {
-      const records = sortByPublishedAt(
-        state.records.filter((record) => videoRecordIds.includes(record.id)),
+      const ownedImportIds = new Set(
+        state.imports
+          .filter((item) => item.ownerId === ownerId)
+          .map((item) => item.id),
       );
-      const baseline = calculateAccountBaseline(state.records);
+      const ownerRecords = state.records.filter((record) =>
+        ownedImportIds.has(record.importId),
+      );
+      const records = sortByPublishedAt(
+        ownerRecords.filter((record) => videoRecordIds.includes(record.id)),
+      );
+      const baseline = calculateAccountBaseline(ownerRecords);
       const jobs = records.flatMap((record) => {
         const match = state.matches.find(
           (item) =>
@@ -377,7 +418,15 @@ export class CloudRepository {
         state.results.push({
           id: createId(),
           analysisJobId: job.id,
-          result: buildRuleDiagnosis(record, baseline, asset.durationSeconds),
+          result: buildRuleDiagnosis(
+            record,
+            baseline,
+            asset.durationSeconds,
+            findSimilarVideosByTags(
+              ownerRecords.filter((item) => item.id !== record.id),
+              { tags: [], title: record.description },
+            ),
+          ),
           editedMarkdown: null,
           createdAt: now,
           updatedAt: now,
@@ -597,6 +646,53 @@ export class CloudRepository {
     this.draftReviewUnsupported();
   }
 
+  async listDraftCoverBriefs(
+    _ownerId: string,
+    _draftReviewId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief[]> {
+    this.draftReviewUnsupported();
+  }
+
+  async getDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async createDraftCoverBrief(
+    _ownerId: string,
+    _brief: import("@video-diagnosis/shared-types").DraftCoverBrief,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async updateDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+    _patch: Partial<import("@video-diagnosis/shared-types").DraftCoverBrief>,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async processDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<import("@video-diagnosis/shared-types").DraftCoverBrief | null> {
+    this.draftReviewUnsupported();
+  }
+
+  async deleteDraftCoverBrief(
+    _ownerId: string,
+    _draftReviewId: string,
+    _briefId: string,
+  ): Promise<boolean> {
+    this.draftReviewUnsupported();
+  }
+
   private scriptWorkbenchUnsupported(): never {
     throw new Error("脚本工作台当前仅支持 LOCAL 模式");
   }
@@ -659,5 +755,5 @@ export class CloudRepository {
 export const repository = new CloudRepository();
 
 export function requestOwnerId(request: Request): string {
-  return request.headers.get("x-owner-id")?.trim() || "local-user";
+  return ownerIdFromRequest(request);
 }

@@ -15,7 +15,8 @@ import { cn } from "@/components/ui";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const localMode = process.env.NEXT_PUBLIC_APP_MODE !== "REAL";
+  const sitesMode = process.env.NEXT_PUBLIC_SITES_DEPLOYMENT === "true";
+  const localMode = !sitesMode && process.env.NEXT_PUBLIC_APP_MODE !== "REAL";
   // 工作流顺序：脚本工作台 → 发布前审片 → 数据匹配 → 数据分析
   const navigation = localMode
     ? [
@@ -29,16 +30,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/analysis", label: "数据分析", icon: BarChart3 },
       ]
     : [
-        { href: "/scripts", label: "脚本工作台", icon: ScrollText },
-        { href: "/review", label: "发布前审片", icon: Clapperboard },
         { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet },
         { href: "/analysis", label: "数据分析", icon: BarChart3 },
       ];
+  const homeHref = localMode ? "/scripts" : "/analysis";
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-line/90 bg-[#f8faf8]/95 backdrop-blur">
         <div className="mx-auto flex min-h-[70px] max-w-[1560px] flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-0">
-          <Link href="/scripts" className="flex items-center gap-3">
+          <Link href={homeHref} className="flex items-center gap-3">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-ink text-white">
               <Film size={18} />
             </span>

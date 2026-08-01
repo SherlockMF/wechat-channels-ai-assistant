@@ -15,17 +15,18 @@ import type {
   VideoMatch,
 } from "@video-diagnosis/shared-types";
 import { Badge, Button, Card, EmptyState } from "@/components/ui";
+import { CoverFramePicker } from "@/features/covers/cover-frame-picker";
 
 interface Bundle {
   import: { originalFilename: string };
   records: ImportedVideoRecord[];
-  assets: Array<VideoAsset & { previewUrl?: string }>;
+  assets: Array<VideoAsset & { previewUrl?: string; coverUrl?: string | null }>;
   matches: VideoMatch[];
 }
 
 interface MatchRow {
   match: VideoMatch;
-  asset: VideoAsset & { previewUrl?: string };
+  asset: VideoAsset & { previewUrl?: string; coverUrl?: string | null };
   record: ImportedVideoRecord | null;
 }
 
@@ -40,6 +41,7 @@ function tone(status: VideoMatch["status"]) {
 export function MatchWorkspace({ importId }: { importId: string }) {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [busyId, setBusyId] = useState("");
+  const [frameAssetId, setFrameAssetId] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch(`/api/imports/${importId}`);
@@ -67,6 +69,8 @@ export function MatchWorkspace({ importId }: { importId: string }) {
     [bundle],
   );
 
+  const frameAsset = rows.find((row) => row.asset.id === frameAssetId)?.asset;
+
   async function confirm(matchId: string, videoRecordId: string | null) {
     setBusyId(matchId);
     await fetch(`/api/imports/${importId}/matches/${matchId}`, {
@@ -80,6 +84,34 @@ export function MatchWorkspace({ importId }: { importId: string }) {
 
   const columns = useMemo<ColumnDef<MatchRow>[]>(
     () => [
+      {
+        header: "封面",
+        cell: ({ row }) => (
+          <div className="w-[88px]">
+            {row.original.asset.coverUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={row.original.asset.coverUrl}
+                alt=""
+                className="h-14 w-20 rounded-lg object-cover"
+              />
+            ) : (
+              <div className="grid h-14 w-20 place-items-center rounded-lg bg-fog text-[#9aa49e]">
+                <Film size={16} />
+              </div>
+            )}
+            {row.original.asset.previewUrl && (
+              <button
+                type="button"
+                className="mt-1 text-[11px] font-bold text-pine hover:underline"
+                onClick={() => setFrameAssetId(row.original.asset.id)}
+              >
+                改选帧
+              </button>
+            )}
+          </div>
+        ),
+      },
       {
         header: "本地视频",
         cell: ({ row }) => (
@@ -196,6 +228,28 @@ export function MatchWorkspace({ importId }: { importId: string }) {
 
   return (
     <div className="space-y-6">
+      {frameAsset?.previewUrl && (
+        <CoverFramePicker
+          videoUrl={frameAsset.previewUrl}
+          durationSeconds={frameAsset.durationSeconds}
+          initialSecond={frameAsset.coverFrameSecond ?? 1}
+          onCancel={() => setFrameAssetId(null)}
+          onConfirm={async (second) => {
+            const response = await fetch(
+              `/api/assets/${frameAsset.id}/cover-from-frame`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ second }),
+              },
+            );
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.error ?? "截帧失败");
+            setFrameAssetId(null);
+            await load();
+          }}
+        />
+      )}
       <div className="grid grid-cols-4 gap-4">
         {[
           ["已关联记录", counts.matched, "text-pine"],
@@ -227,7 +281,7 @@ export function MatchWorkspace({ importId }: { importId: string }) {
             href="/analysis"
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-pine px-4 text-sm font-bold text-white"
           >
-            进入分析队列
+            进入数据分析
             <ArrowRight size={15} />
           </Link>
         </div>
@@ -235,7 +289,7 @@ export function MatchWorkspace({ importId }: { importId: string }) {
           <div className="p-6">
             <EmptyState
               title="尚未上传视频"
-              description="返回创建分析页，选择本地视频后运行自动匹配。"
+              description="切换到「上传新批次」，或使用本地 videoes 目录。"
             />
           </div>
         ) : (

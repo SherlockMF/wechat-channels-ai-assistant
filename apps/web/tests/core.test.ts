@@ -13,6 +13,7 @@ import {
   parseNullableNumber,
   parsePercentage,
   parseWorkbook,
+  validateWorkbookFile,
 } from "@/lib/imports/parser";
 import { normalizeTitle } from "@/lib/imports/normalize";
 import {
@@ -128,6 +129,15 @@ function record(
 }
 
 describe("Excel 导入", () => {
+  it("拒绝空文件和伪装扩展名，限制易受攻击解析器的输入面", () => {
+    expect(() => validateWorkbookFile(new File([], "empty.xlsx"))).toThrow(
+      "Excel 文件大小",
+    );
+    expect(() => validateWorkbookFile(new File(["x"], "payload.txt"))).toThrow(
+      "仅支持",
+    );
+  });
+
   it("转换 Excel 日期序列号", () => {
     expect(excelSerialToDate(45292).toISOString().slice(0, 10)).toBe("2024-01-01");
   });

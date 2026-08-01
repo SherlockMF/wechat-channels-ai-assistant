@@ -16,5 +16,12 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "rollup": "4.62.3",
+    "vite": "8.0.13"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "4.62.3"
   }
 }

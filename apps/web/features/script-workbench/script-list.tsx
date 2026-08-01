@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Copy, Trash2 } from "lucide-react";
-import type { ScriptDraft, ScriptDraftFormat, ScriptDraftTopic } from "@video-diagnosis/shared-types";
+import type { ScriptDraft } from "@video-diagnosis/shared-types";
+import { SelectWithOther } from "@/components/select-with-other";
 import { Badge, Button, Card, EmptyState } from "@/components/ui";
 import {
   SCRIPT_FORMAT_OPTIONS,
@@ -20,10 +21,9 @@ export function ScriptList() {
   const [items, setItems] = useState<ScriptDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [formatFilter, setFormatFilter] = useState<ScriptDraftFormat | "">("");
-  const [topicFilter, setTopicFilter] = useState<ScriptDraftTopic | "" | "none">(
-    "",
-  );
+  /** 预设 value、「other」、空=全部；自定义文本匹配 formatOther/topicOther */
+  const [formatFilter, setFormatFilter] = useState("");
+  const [topicFilter, setTopicFilter] = useState("");
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
 
@@ -45,10 +45,39 @@ export function ScriptList() {
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
-      if (formatFilter && item.format !== formatFilter) return false;
-      if (topicFilter === "none" && item.topic !== null) return false;
-      if (topicFilter && topicFilter !== "none" && item.topic !== topicFilter) {
-        return false;
+      if (formatFilter) {
+        const knownFormat = SCRIPT_FORMAT_OPTIONS.some(
+          (option) => option.value === formatFilter,
+        );
+        if (knownFormat) {
+          if (item.format !== formatFilter) return false;
+        } else if (formatFilter === "other" || formatFilter.trim()) {
+          if (item.format !== "other") return false;
+          if (
+            formatFilter !== "other" &&
+            !(item.formatOther ?? "").includes(formatFilter.trim())
+          ) {
+            return false;
+          }
+        }
+      }
+      if (topicFilter === "none") {
+        if (item.topic !== null) return false;
+      } else if (topicFilter) {
+        const knownTopic = SCRIPT_TOPIC_OPTIONS.some(
+          (option) => option.value === topicFilter,
+        );
+        if (knownTopic) {
+          if (item.topic !== topicFilter) return false;
+        } else if (topicFilter === "other" || topicFilter.trim()) {
+          if (item.topic !== "other") return false;
+          if (
+            topicFilter !== "other" &&
+            !(item.topicOther ?? "").includes(topicFilter.trim())
+          ) {
+            return false;
+          }
+        }
       }
       return true;
     });
@@ -85,43 +114,27 @@ export function ScriptList() {
   return (
     <div className="space-y-4">
       <Card className="flex flex-wrap items-end gap-3 p-4">
-        <label className="grid gap-1 text-xs font-semibold text-[#52615a]">
-          制作形态
-          <select
-            className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
-            value={formatFilter}
-            onChange={(event) =>
-              setFormatFilter(event.target.value as ScriptDraftFormat | "")
-            }
-          >
-            <option value="">全部</option>
-            {SCRIPT_FORMAT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1 text-xs font-semibold text-[#52615a]">
-          业务主题
-          <select
-            className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
-            value={topicFilter}
-            onChange={(event) =>
-              setTopicFilter(
-                event.target.value as ScriptDraftTopic | "" | "none",
-              )
-            }
-          >
-            <option value="">全部</option>
-            <option value="none">未选主题</option>
-            {SCRIPT_TOPIC_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectWithOther
+          label="制作形态"
+          value={formatFilter}
+          onChange={setFormatFilter}
+          options={SCRIPT_FORMAT_OPTIONS}
+          allowEmpty
+          emptyLabel="全部"
+          otherPlaceholder="筛选自定义形态关键词"
+        />
+        <SelectWithOther
+          label="业务主题"
+          value={topicFilter}
+          onChange={setTopicFilter}
+          options={[
+            { value: "none", label: "未选主题" },
+            ...SCRIPT_TOPIC_OPTIONS,
+          ]}
+          allowEmpty
+          emptyLabel="全部"
+          otherPlaceholder="筛选自定义主题关键词"
+        />
         {message ? (
           <p className="text-xs font-medium text-pine">{message}</p>
         ) : null}

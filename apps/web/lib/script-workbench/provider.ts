@@ -10,11 +10,13 @@ import { DashScopeScriptProvider, hasDashScopeCredentials } from "@/lib/script-w
 
 export interface ScriptProvider {
   readonly name: string;
+  readonly resultProviderName?: string;
   generate(request: ScriptGenerateRequest): Promise<ScriptDraftOutput>;
 }
 
 export class MockScriptProvider implements ScriptProvider {
   readonly name = "mock";
+  readonly resultProviderName = "mock";
 
   async generate(request: ScriptGenerateRequest): Promise<ScriptDraftOutput> {
     return buildMockScriptOutput(request);

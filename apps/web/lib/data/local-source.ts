@@ -262,6 +262,7 @@ export async function buildLocalSourceState(): Promise<LocalSourceSnapshot> {
       draftReviews: [],
       draftReviewVersions: [],
       draftResults: [],
+      draftCoverBriefs: [],
       scriptDrafts: [],
     },
     fingerprint,

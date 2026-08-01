@@ -511,6 +511,22 @@ export function VideoDiagnosis({
               </Card>
             </div>
 
+            <Card className="p-5">
+              <h3 className="font-bold">标题建议</h3>
+              <div className="mt-3 space-y-3">
+                {(result.titleSuggestions ?? []).map((item) => (
+                  <div key={item.title} className="rounded-xl bg-fog p-3">
+                    <p className="text-sm font-bold">{item.title}</p>
+                    <p className="mt-1 text-sm leading-6 text-[#5d6b64]">{item.rationale}</p>
+                    <p className="mt-1 text-xs text-pine">预期：{item.expectedEffect}</p>
+                  </div>
+                ))}
+                {(result.titleSuggestions?.length ?? 0) === 0 && (
+                  <p className="text-sm text-[#7a8680]">暂无标题建议</p>
+                )}
+              </div>
+            </Card>
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Card className="p-5">
                 <div className="flex items-center gap-2">
@@ -518,6 +534,29 @@ export function VideoDiagnosis({
                   <h3 className="font-bold">文案与字幕</h3>
                 </div>
                 <div className="mt-3 space-y-3 text-sm leading-6 text-[#5d6b64]">
+                  {result.copyAndSubtitleReview && (
+                    <div className="rounded-xl bg-fog p-3 text-sm leading-6">
+                      <p>
+                        <span className="font-bold text-ink">文案合理性：</span>
+                        {result.copyAndSubtitleReview.copyRationality}
+                      </p>
+                      <p className="mt-1">
+                        <span className="font-bold text-ink">文案专业性：</span>
+                        {result.copyAndSubtitleReview.copyProfessionalism}
+                      </p>
+                      <p className="mt-1">
+                        <span className="font-bold text-ink">字幕合理性：</span>
+                        {result.copyAndSubtitleReview.subtitleRationality}
+                      </p>
+                      <p className="mt-1">
+                        <span className="font-bold text-ink">字幕专业性：</span>
+                        {result.copyAndSubtitleReview.subtitleProfessionalism}
+                      </p>
+                      <p className="mt-2 text-pine">
+                        修改要点：{result.copyAndSubtitleReview.revisionPoints.join("；")}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-xs font-bold text-[#7b8880]">原内容概述</p>
                     <p>{result.copySuggestions.originalSummary}</p>

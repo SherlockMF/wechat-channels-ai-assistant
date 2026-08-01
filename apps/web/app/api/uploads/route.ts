@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
 import { matchAssets } from "@/lib/matching/similarity";
 import { savePrivateVideo } from "@/lib/storage/storage";
+import {
+  ensureCoverForVideo,
+  isCoverImageFile,
+  pairCoversByBasename,
+  validateCoverImage,
+} from "@/lib/storage/cover";
 
 export const runtime = "nodejs";
 
@@ -10,9 +16,16 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const importId = String(formData.get("importId") ?? "");
-    const files = formData
+    const allFiles = formData
       .getAll("files")
       .filter((value): value is File => value instanceof File);
+    const coverFiles = [
+      ...formData
+        .getAll("covers")
+        .filter((value): value is File => value instanceof File),
+      ...allFiles.filter((file) => isCoverImageFile(file)),
+    ];
+    const files = allFiles.filter((file) => !isCoverImageFile(file));
     const maxFiles = Number(process.env.MAX_VIDEO_FILES ?? 100);
     if (!importId || files.length === 0) {
       return NextResponse.json(
@@ -26,15 +39,28 @@ export async function POST(request: Request) {
         { status: 413 },
       );
     }
+    for (const cover of coverFiles) {
+      validateCoverImage(cover);
+    }
     const bundle = await repository.getImport(ownerId, importId);
     if (!bundle) {
       return NextResponse.json({ error: "导入批次不存在" }, { status: 404 });
     }
+    const coverByVideoName = pairCoversByBasename(files, coverFiles);
     const assets = [];
     const errors: Array<{ filename: string; message: string }> = [];
     for (const file of files) {
       try {
-        assets.push(await savePrivateVideo(ownerId, importId, file));
+        const asset = await savePrivateVideo(ownerId, importId, file);
+        const cover = await ensureCoverForVideo({
+          ownerId,
+          entityId: asset.id,
+          videoPath: asset.storagePath,
+          durationSeconds: asset.durationSeconds,
+          coverFile: coverByVideoName.get(file.name) ?? null,
+        });
+        Object.assign(asset, cover);
+        assets.push(asset);
       } catch (error) {
         errors.push({
           filename: file.name,
@@ -48,7 +74,18 @@ export async function POST(request: Request) {
       assets,
       matches,
     );
-    return NextResponse.json({ summary, matches, errors }, { status: 201 });
+    return NextResponse.json(
+      {
+        summary,
+        matches,
+        errors,
+        coverStats: {
+          uploaded: [...coverByVideoName.keys()].length,
+          autoFrame: assets.filter((asset) => asset.coverSource === "frame").length,
+        },
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "视频上传失败" },

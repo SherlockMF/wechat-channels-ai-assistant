@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Clipboard, Download, Save, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, Clipboard, Download, FileDown, Save, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Badge, Button, Card } from "@/components/ui";
+import { exportMarkdownAsPdf } from "@/lib/reports/export-pdf";
 
 export function ReportEditor({
   videoId,
@@ -162,6 +163,16 @@ export function ReportEditor({
     setStatus("Markdown 已导出");
   }
 
+  function downloadPdf() {
+    try {
+      exportMarkdownAsPdf(markdown, `视频诊断-${videoId}`);
+      setStatus("已打开 PDF 打印预览，请选择「另存为 PDF」");
+      setError("");
+    } catch (pdfError) {
+      setError(pdfError instanceof Error ? pdfError.message : "PDF 导出失败");
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <Card className="overflow-hidden">
@@ -201,6 +212,15 @@ export function ReportEditor({
             >
               <Download size={13} />
               导出 Markdown
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={loading || !markdown.trim()}
+              onClick={downloadPdf}
+            >
+              <FileDown size={13} />
+              导出 PDF
             </Button>
             <Button
               size="sm"

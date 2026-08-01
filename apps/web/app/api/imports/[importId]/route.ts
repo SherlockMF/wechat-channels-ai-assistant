@@ -25,6 +25,15 @@ export async function GET(request: Request, context: Context) {
         ownerId,
         expires,
       )}`,
+      coverUrl: asset.coverPath
+        ? `/api/assets/${asset.id}/cover?owner=${encodeURIComponent(
+            ownerId,
+          )}&expires=${expires}&signature=${createAssetSignature(
+            asset.id,
+            ownerId,
+            expires,
+          )}`
+        : null,
     })),
   });
 }

@@ -38,6 +38,9 @@ const analysisModeLabel: Record<string, string> = {
   local_rule: "本地规则诊断",
   codex_multimodal: "Codex 多模态诊断",
   worker: "Worker 内容诊断",
+  draft_mock: "发布前审片（Provider 占位）",
+  draft_provider: "发布前审片（LLM Provider）",
+  draft_dashscope: "发布前审片（阿里云百炼）",
 };
 
 
@@ -118,6 +121,28 @@ ${result.revisedOpening
 ## 开头备选
 
 ${result.hookAlternatives.map((item) => `- ${hookTypeLabel[item.type] ?? item.type}：口播「${item.voiceover}」；字幕「${item.subtitle}」；画面「${item.visual}」`).join("\n")}
+
+## 文案与字幕专业性
+
+- 文案合理性：${result.copyAndSubtitleReview?.copyRationality ?? "未评估"}
+- 文案专业性：${result.copyAndSubtitleReview?.copyProfessionalism ?? "未评估"}
+- 字幕合理性：${result.copyAndSubtitleReview?.subtitleRationality ?? "未评估"}
+- 字幕专业性：${result.copyAndSubtitleReview?.subtitleProfessionalism ?? "未评估"}
+- 主要问题：${(result.copyAndSubtitleReview?.issues ?? []).join("；") || "无"}
+- 修改要点：${(result.copyAndSubtitleReview?.revisionPoints ?? []).join("；") || "无"}
+
+## 标题建议
+
+${(result.titleSuggestions ?? [])
+  .map(
+    (item, index) =>
+      `### ${index + 1}. ${item.title}
+
+- 理由：${item.rationale}
+- 预期效果：${item.expectedEffect}
+- 参考相似标题：${(item.basedOnSimilarTitles ?? []).join("；") || "无"}`,
+  )
+  .join("\n\n") || "- 暂无标题建议"}
 
 ## 文案与声音
 

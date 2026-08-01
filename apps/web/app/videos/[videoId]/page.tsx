@@ -28,7 +28,7 @@ export default async function VideoPage({
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-4 text-sm font-bold text-pine transition hover:bg-fog"
           >
             <ArrowLeft size={15} />
-            返回分析队列
+            返回数据分析
           </Link>
         }
       />

@@ -18,11 +18,13 @@ export interface DraftReviewProviderInput {
 
 export interface DraftReviewProvider {
   readonly name: string;
+  readonly resultProviderName?: string;
   analyze(input: DraftReviewProviderInput): Promise<DiagnosisResult>;
 }
 
 export class MockDraftReviewProvider implements DraftReviewProvider {
   readonly name = "mock";
+  readonly resultProviderName = "mock";
 
   async analyze(input: DraftReviewProviderInput): Promise<DiagnosisResult> {
     return buildDraftDiagnosis(

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseWorkbook } from "@/lib/imports/parser";
+import { parseWorkbook, validateWorkbookFile } from "@/lib/imports/parser";
 import { repository, requestOwnerId } from "@/lib/data/repository";
 
 export const runtime = "nodejs";
@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "请选择 Excel 文件" }, { status: 400 });
     }
+    validateWorkbookFile(file);
     const preview = parseWorkbook(await file.arrayBuffer());
     if (!preview.records.length) {
       return NextResponse.json(
@@ -31,9 +32,13 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? Number((error as { status: number }).status)
+        : 422;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "导入失败" },
-      { status: 422 },
+      { status: status === 413 || status === 415 ? status : 422 },
     );
   }
 }

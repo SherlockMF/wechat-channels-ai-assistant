@@ -85,13 +85,19 @@ function extractJson(text: string): unknown {
 
 export class DashScopeScriptProvider implements ScriptProvider {
   readonly name = "dashscope";
+  private actualProviderName = "dashscope";
+
+  get resultProviderName(): string {
+    return this.actualProviderName;
+  }
 
   async generate(request: ScriptGenerateRequest): Promise<ScriptDraftOutput> {
+    this.actualProviderName = "dashscope";
     const koubo = isKouboFormat(request.format);
     const prompt = [
       "你是视频号脚本助手，服务开远本地智能家居/净水/水电公司「恒远」。",
-      `制作形态：${formatLabel(request.format)}`,
-      `业务主题：${topicLabel(request.topic)}`,
+      `制作形态：${formatLabel(request.format, request.input.formatOther)}`,
+      `业务主题：${topicLabel(request.topic, request.input.topicOther)}`,
       request.subTopics.length
         ? `智能子品：${smartSubTopicLabels(request.subTopics).join("、")}`
         : "",
@@ -149,6 +155,7 @@ export class DashScopeScriptProvider implements ScriptProvider {
         plainText: parsed.plainText?.trim() || outputToPlainText(parsed),
       };
     } catch {
+      this.actualProviderName = "mock";
       return buildMockScriptOutput(request);
     }
   }

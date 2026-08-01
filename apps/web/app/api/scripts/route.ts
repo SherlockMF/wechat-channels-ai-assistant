@@ -37,6 +37,24 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (body.format === "other" && !body.input.formatOther?.trim()) {
+      return NextResponse.json(
+        { error: "制作形态选择「其他」时请填写自定义名称" },
+        { status: 400 },
+      );
+    }
+    if (body.topic === "other" && !body.input.topicOther?.trim()) {
+      return NextResponse.json(
+        { error: "业务主题选择「其他」时请填写自定义名称" },
+        { status: 400 },
+      );
+    }
+    if (body.input.tone === "other" && !body.input.toneOther?.trim()) {
+      return NextResponse.json(
+        { error: "语气选择「其他」时请填写自定义说明" },
+        { status: 400 },
+      );
+    }
     const draft = await repository.generateScriptDraft(ownerId, {
       format: body.format,
       topic: body.topic ?? null,

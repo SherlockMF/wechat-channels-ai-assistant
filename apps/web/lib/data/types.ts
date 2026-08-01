@@ -1,6 +1,7 @@
 import type {
   AnalysisJobStatus,
   DiagnosisResult,
+  DraftCoverBrief,
   DraftReview,
   DraftReviewResult,
   DraftReviewVersion,
@@ -57,6 +58,7 @@ export interface AppState {
   draftReviews: DraftReview[];
   draftReviewVersions: DraftReviewVersion[];
   draftResults: DraftReviewResult[];
+  draftCoverBriefs: DraftCoverBrief[];
   scriptDrafts: ScriptDraft[];
 }
 
@@ -70,5 +72,6 @@ export const emptyState = (): AppState => ({
   draftReviews: [],
   draftReviewVersions: [],
   draftResults: [],
+  draftCoverBriefs: [],
   scriptDrafts: [],
 });

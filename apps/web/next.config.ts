@@ -1,6 +1,15 @@
 import path from "node:path";
-import { loadEnvConfig } from "@next/env";
+import * as nextEnvNamespace from "@next/env";
 import type { NextConfig } from "next";
+
+const nextEnv = nextEnvNamespace as typeof nextEnvNamespace & {
+  default?: typeof nextEnvNamespace;
+};
+const loadEnvConfig =
+  nextEnv.loadEnvConfig ?? nextEnv.default?.loadEnvConfig;
+if (!loadEnvConfig) {
+  throw new Error("@next/env 未提供 loadEnvConfig");
+}
 
 // 优先加载仓库根目录 .env（monorepo），再加载 apps/web/.env
 const appDir = process.cwd();

@@ -23,7 +23,7 @@ export const SCRIPT_TOPIC_OPTIONS: Array<{
   value: ScriptDraftTopic;
   label: string;
 }> = [
-  { value: "smart_home", label: "全屋智能" },
+  { value: "smart_home", label: "全屋智能（可选子品）" },
   { value: "water", label: "全屋净水" },
   { value: "hydro", label: "水电工程" },
   { value: "service", label: "综合服务" },
@@ -58,11 +58,12 @@ const KOUBO_FORMATS = new Set<ScriptDraftFormat>([
 ]);
 
 export function isKouboFormat(format: ScriptDraftFormat): boolean {
+  if (format === "other") return true;
   return KOUBO_FORMATS.has(format);
 }
 
 export function topicRequired(format: ScriptDraftFormat): boolean {
-  return format !== "vlog";
+  return format !== "vlog" && format !== "other";
 }
 
 export function defaultTopicForFormat(
@@ -70,18 +71,28 @@ export function defaultTopicForFormat(
 ): ScriptDraftTopic | null {
   if (format === "hydro_site") return "hydro";
   if (format === "service_intro") return "service";
-  if (format === "vlog") return null;
+  if (format === "vlog" || format === "other") return null;
   return null;
 }
 
-export function formatLabel(format: ScriptDraftFormat): string {
+export function formatLabel(
+  format: ScriptDraftFormat,
+  formatOther?: string | null,
+): string {
+  if (format === "other") {
+    return formatOther?.trim() || "其他形态";
+  }
   return (
     SCRIPT_FORMAT_OPTIONS.find((item) => item.value === format)?.label ?? format
   );
 }
 
-export function topicLabel(topic: ScriptDraftTopic | null): string {
+export function topicLabel(
+  topic: ScriptDraftTopic | null,
+  topicOther?: string | null,
+): string {
   if (!topic) return "未选主题";
+  if (topic === "other") return topicOther?.trim() || "其他主题";
   return (
     SCRIPT_TOPIC_OPTIONS.find((item) => item.value === topic)?.label ?? topic
   );

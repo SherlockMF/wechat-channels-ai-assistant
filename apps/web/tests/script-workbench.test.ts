@@ -81,6 +81,8 @@ describe("script workbench catalog and mock", () => {
       ownerId: "u",
       format: "koubo",
       topic: "smart_home",
+      formatOther: null,
+      topicOther: null,
       subTopics: ["curtain"],
       processKinds: [],
       title:
