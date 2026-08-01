@@ -18,22 +18,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const sitesMode = process.env.NEXT_PUBLIC_SITES_DEPLOYMENT === "true";
   const localMode = !sitesMode && process.env.NEXT_PUBLIC_APP_MODE !== "REAL";
   // 工作流顺序：脚本工作台 → 发布前审片 → 数据匹配 → 数据分析
-  const navigation = localMode
-    ? [
-        { href: "/scripts", label: "脚本工作台", icon: ScrollText },
-        { href: "/review", label: "发布前审片", icon: Clapperboard },
-        {
+  const navigation = [
+    { href: "/scripts", label: "脚本工作台", icon: ScrollText },
+    { href: "/review", label: "发布前审片", icon: Clapperboard },
+    sitesMode
+      ? { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet }
+      : {
           href: "/imports/local-source/matching",
           label: "数据匹配",
           icon: Database,
         },
-        { href: "/analysis", label: "数据分析", icon: BarChart3 },
-      ]
-    : [
-        { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet },
-        { href: "/analysis", label: "数据分析", icon: BarChart3 },
-      ];
-  const homeHref = localMode ? "/scripts" : "/analysis";
+    { href: "/analysis", label: "数据分析", icon: BarChart3 },
+  ];
+  const homeHref = "/scripts";
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-line/90 bg-[#f8faf8]/95 backdrop-blur">
