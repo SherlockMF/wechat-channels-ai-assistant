@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
-import { saveCoverFromFrame } from "@/lib/storage/cover";
+import { saveCoverImageFile } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ draftReviewId: string }> };
@@ -13,9 +13,16 @@ const bodySchema = z.object({
 export async function POST(request: Request, context: Context) {
   const { draftReviewId } = await context.params;
   const ownerId = requestOwnerId(request);
-  const parsed = bodySchema.safeParse(await request.json());
+  const formData = await request.formData();
+  const parsed = bodySchema.safeParse({ second: Number(formData.get("second")) });
+  const frameValue = formData.get("frame");
+  const frame =
+    frameValue instanceof File && frameValue.size > 0 ? frameValue : null;
   if (!parsed.success) {
     return NextResponse.json({ error: "截帧秒数无效" }, { status: 400 });
+  }
+  if (!frame) {
+    return NextResponse.json({ error: "缺少截帧画面" }, { status: 400 });
   }
   const payload = await repository.getDraftReview(ownerId, draftReviewId);
   if (!payload) {
@@ -23,12 +30,12 @@ export async function POST(request: Request, context: Context) {
   }
   const versionId = payload.viewingVersionId || payload.draft.currentVersionId;
   try {
-    const cover = await saveCoverFromFrame(
-      ownerId,
-      versionId || draftReviewId,
-      payload.draft.storagePath,
-      parsed.data.second,
-    );
+    const saved = await saveCoverImageFile(ownerId, versionId || draftReviewId, frame);
+    const cover = {
+      ...saved,
+      coverSource: "frame" as const,
+      coverFrameSecond: parsed.data.second,
+    };
     if (versionId) {
       await repository.updateDraftReviewVersion(
         ownerId,

@@ -5,7 +5,7 @@ import { parseCoverBriefOptionsFromForm } from "@/lib/draft-review/cover-brief-o
 import {
   copyCoverBriefBackground,
   saveCoverBriefBackground,
-} from "@/lib/storage/cover-brief-storage";
+} from "@/lib/storage/storage";
 import { createAssetSignature } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";

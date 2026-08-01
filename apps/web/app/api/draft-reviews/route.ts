@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
-import { saveDraftReviewVideo } from "@/lib/storage/draft-review-storage";
+import { saveDraftReviewVideo } from "@/lib/storage/storage";
 import { createAssetSignature } from "@/lib/storage/storage";
 import { normalizeDraftTags } from "@/lib/draft-review/similar-videos";
 

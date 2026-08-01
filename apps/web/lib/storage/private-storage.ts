@@ -217,6 +217,18 @@ export async function servePrivateFile(
   }
 }
 
+export async function readPrivateFileAsDataUrl(
+  filePath: string,
+  mimeType: string,
+): Promise<string | null> {
+  try {
+    const buffer = await fs.readFile(filePath);
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function servePrivateVideo(
   request: Request,
   asset: VideoAsset,

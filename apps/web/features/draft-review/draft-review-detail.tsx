@@ -316,13 +316,15 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
           durationSeconds={payload.draft.durationSeconds}
           initialSecond={payload.draft.coverFrameSecond ?? 1}
           onCancel={() => setPickingFrame(false)}
-          onConfirm={async (second) => {
+          onConfirm={async (second, frame) => {
+            const data = new FormData();
+            data.append("second", String(second));
+            data.append("frame", frame);
             const response = await fetch(
               `/api/draft-reviews/${draftReviewId}/cover-from-frame`,
               {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ second }),
+                body: data,
               },
             );
             const body = await response.json();

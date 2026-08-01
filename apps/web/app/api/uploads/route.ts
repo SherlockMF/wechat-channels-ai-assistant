@@ -1,13 +1,36 @@
 import { NextResponse } from "next/server";
 import { repository, requestOwnerId } from "@/lib/data/repository";
 import { matchAssets } from "@/lib/matching/similarity";
-import { savePrivateVideo } from "@/lib/storage/storage";
 import {
-  ensureCoverForVideo,
+  saveCoverImageFile,
+  savePrivateVideo,
+} from "@/lib/storage/storage";
+import {
+  fileBasename,
   isCoverImageFile,
-  pairCoversByBasename,
-  validateCoverImage,
-} from "@/lib/storage/cover";
+} from "@/lib/storage/cover-client";
+
+function validateCoverImage(file: File): void {
+  if (!isCoverImageFile(file)) {
+    throw new Error(`${file.name}：封面仅支持 JPG、PNG、WebP`);
+  }
+  if (file.size <= 0 || file.size > 20 * 1024 * 1024) {
+    throw new Error(`${file.name}：封面大小必须在 0～20MB`);
+  }
+}
+
+function pairCoversByBasename(
+  videos: File[],
+  covers: File[],
+): Map<string, File> {
+  const byName = new Map(covers.map((file) => [fileBasename(file.name), file]));
+  return new Map(
+    videos.flatMap((video) => {
+      const cover = byName.get(fileBasename(video.name));
+      return cover ? [[video.name, cover] as const] : [];
+    }),
+  );
+}
 
 export const runtime = "nodejs";
 
@@ -52,14 +75,13 @@ export async function POST(request: Request) {
     for (const file of files) {
       try {
         const asset = await savePrivateVideo(ownerId, importId, file);
-        const cover = await ensureCoverForVideo({
-          ownerId,
-          entityId: asset.id,
-          videoPath: asset.storagePath,
-          durationSeconds: asset.durationSeconds,
-          coverFile: coverByVideoName.get(file.name) ?? null,
-        });
-        Object.assign(asset, cover);
+        const coverFile = coverByVideoName.get(file.name);
+        if (coverFile) {
+          Object.assign(
+            asset,
+            await saveCoverImageFile(ownerId, asset.id, coverFile),
+          );
+        }
         assets.push(asset);
       } catch (error) {
         errors.push({

@@ -1,8 +1,15 @@
 import type {
+  DraftCoverBrief,
   DraftReview,
   DraftReviewResult,
+  DraftReviewVersion,
   ImportedVideoRecord,
   ScriptDraft,
+  ScriptDraftFormat,
+  ScriptDraftInput,
+  ScriptDraftProcessKind,
+  ScriptDraftSmartSubTopic,
+  ScriptDraftTopic,
   VideoAsset,
   VideoMatch,
 } from "@video-diagnosis/shared-types";
@@ -19,6 +26,31 @@ import { diagnosisToMarkdown } from "@/lib/analysis/markdown";
 import { selectPreferredAnalysisJob } from "@/lib/data/job-selection";
 import { ownerIdFromRequest } from "@/lib/data/owner";
 import { findSimilarVideosByTags } from "@/lib/draft-review/similar-videos";
+import { buildVersionChangelog } from "@/lib/draft-review/changelog";
+import { resolveCoverBriefProvider } from "@/lib/draft-review/cover-brief-dashscope";
+import type { CoverBriefContext } from "@/lib/draft-review/cover-brief-provider";
+import type { DraftEvidenceManifest } from "@/lib/draft-review/evidence";
+import { resolveDraftReviewProvider } from "@/lib/draft-review/provider";
+import {
+  applyVersionToDraft,
+  canAddDraftVersion,
+  migrateDraftReviewVersions,
+  versionFromDraftFields,
+} from "@/lib/draft-review/versions";
+import { defaultTopicForFormat, topicRequired } from "@/lib/script-workbench/catalog";
+import {
+  preferScriptBody,
+  resolveDraftListTitle,
+  sanitizeGeneratedTitles,
+  summarizeIdea,
+} from "@/lib/script-workbench/display";
+import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import { resolveScriptProvider } from "@/lib/script-workbench/provider";
+import {
+  findScriptReferences,
+  formatReferencesForPrompt,
+} from "@/lib/script-workbench/references";
+import { deletePrivateFiles } from "@/lib/storage/storage";
 
 interface D1Statement {
   bind(...values: unknown[]): D1Statement;
@@ -531,7 +563,7 @@ export class CloudRepository {
       coverSource: "uploaded" | "frame";
       coverFrameSecond: number | null;
     },
-  ) {
+  ): Promise<VideoAsset | null> {
     this.draftReviewUnsupported();
   }
 
@@ -594,7 +626,7 @@ export class CloudRepository {
     _draftReviewId: string,
     _versionId: string,
     _patch: Partial<import("@video-diagnosis/shared-types").DraftReviewVersion>,
-  ) {
+  ): Promise<DraftReviewVersion | null> {
     this.draftReviewUnsupported();
   }
 
@@ -752,7 +784,787 @@ export class CloudRepository {
   }
 }
 
-export const repository = new CloudRepository();
+function normalizeScriptDraft(draft: ScriptDraft): ScriptDraft {
+  return {
+    ...draft,
+    formatOther: draft.formatOther ?? null,
+    topicOther: draft.topicOther ?? null,
+  };
+}
+
+class SitesRepository extends CloudRepository {
+  async listScriptDrafts(ownerId: string): Promise<ScriptDraft[]> {
+    const state = await readState();
+    return state.scriptDrafts
+      .filter((item) => item.ownerId === ownerId)
+      .map(normalizeScriptDraft)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async getScriptDraft(ownerId: string, scriptId: string): Promise<ScriptDraft | null> {
+    const state = await readState();
+    const draft = state.scriptDrafts.find(
+      (item) => item.id === scriptId && item.ownerId === ownerId,
+    );
+    return draft ? normalizeScriptDraft(draft) : null;
+  }
+
+  async createScriptDraft(ownerId: string, draft: ScriptDraft): Promise<ScriptDraft> {
+    return mutate((state) => {
+      if (draft.ownerId !== ownerId) draft.ownerId = ownerId;
+      state.scriptDrafts.push(draft);
+      return draft;
+    });
+  }
+
+  async updateScriptDraft(
+    ownerId: string,
+    scriptId: string,
+    patch: Partial<ScriptDraft>,
+  ): Promise<ScriptDraft | null> {
+    return mutate((state) => {
+      const draft = state.scriptDrafts.find(
+        (item) => item.id === scriptId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      Object.assign(draft, patch, {
+        id: scriptId,
+        ownerId,
+        updatedAt: new Date().toISOString(),
+      });
+      return draft;
+    });
+  }
+
+  async deleteScriptDraft(ownerId: string, scriptId: string): Promise<boolean> {
+    return mutate((state) => {
+      const index = state.scriptDrafts.findIndex(
+        (item) => item.id === scriptId && item.ownerId === ownerId,
+      );
+      if (index < 0) return false;
+      state.scriptDrafts.splice(index, 1);
+      return true;
+    });
+  }
+
+  async generateScriptDraft(
+    ownerId: string,
+    params: {
+      format: ScriptDraftFormat;
+      topic?: ScriptDraftTopic | null;
+      subTopics?: ScriptDraftSmartSubTopic[];
+      processKinds?: ScriptDraftProcessKind[];
+      input: ScriptDraftInput;
+      title?: string | null;
+    },
+  ): Promise<ScriptDraft> {
+    const topic =
+      params.topic === undefined
+        ? defaultTopicForFormat(params.format)
+        : params.topic;
+    if (topicRequired(params.format) && !topic) {
+      throw Object.assign(new Error("该制作形态需要选择业务主题"), { status: 400 });
+    }
+    const state = await readState();
+    const refs = findScriptReferences(
+      state.records,
+      params.format,
+      topic,
+      params.input.idea,
+    );
+    const provider = resolveScriptProvider();
+    let output = await provider.generate({
+      format: params.format,
+      topic,
+      subTopics: params.subTopics ?? [],
+      processKinds: params.processKinds ?? [],
+      input: params.input,
+      referenceHints: formatReferencesForPrompt(refs),
+    });
+    output = preferScriptBody(output, params.input.existingScript);
+    output = {
+      ...output,
+      titles: sanitizeGeneratedTitles(output.titles, params.input.idea),
+    };
+    output = { ...output, plainText: outputToPlainText(output) };
+
+    const ideaSummary = summarizeIdea({
+      idea: params.input.idea,
+      existingScript: params.input.existingScript,
+    });
+    const now = new Date().toISOString();
+    const draft: ScriptDraft = {
+      id: createId(),
+      ownerId,
+      format: params.format,
+      topic,
+      formatOther: params.input.formatOther?.trim() || null,
+      topicOther: params.input.topicOther?.trim() || null,
+      subTopics: params.subTopics ?? [],
+      processKinds: params.processKinds ?? [],
+      title: null,
+      ideaSummary,
+      input: params.input,
+      output,
+      status: "ready",
+      provider: provider.resultProviderName ?? provider.name,
+      referenceVideoIds: refs.map((item) => item.videoRecordId),
+      createdAt: now,
+      updatedAt: now,
+    };
+    draft.title =
+      params.title?.trim() ||
+      resolveDraftListTitle(draft) ||
+      ideaSummary;
+    return this.createScriptDraft(ownerId, draft);
+  }
+
+  async regenerateScriptDraft(ownerId: string, scriptId: string): Promise<ScriptDraft> {
+    const existing = await this.getScriptDraft(ownerId, scriptId);
+    if (!existing) {
+      throw Object.assign(new Error("脚本不存在"), { status: 404 });
+    }
+    return this.generateScriptDraft(ownerId, {
+      format: existing.format,
+      topic: existing.topic,
+      subTopics: existing.subTopics,
+      processKinds: existing.processKinds,
+      input: existing.input,
+      title: existing.title,
+    });
+  }
+}
+class DraftSitesRepository extends SitesRepository {
+  async updateAssetCover(
+    ownerId: string,
+    assetId: string,
+    cover: {
+      coverPath: string;
+      coverSource: "uploaded" | "frame";
+      coverFrameSecond: number | null;
+    },
+  ): Promise<VideoAsset | null> {
+    return mutate((state) => {
+      const asset = state.assets.find((item) => item.id === assetId);
+      const owned = asset
+        ? state.imports.some(
+            (item) => item.id === asset.importId && item.ownerId === ownerId,
+          )
+        : false;
+      if (!asset || !owned) return null;
+      Object.assign(asset, cover);
+      return asset;
+    });
+  }
+
+  async listDraftReviews(ownerId: string): Promise<DraftReview[]> {
+    const state = await readState();
+    migrateDraftReviewVersions(state);
+    return state.draftReviews
+      .filter((item) => item.ownerId === ownerId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getDraftReview(
+    ownerId: string,
+    draftReviewId: string,
+    options?: { versionId?: string | null },
+  ) {
+    const state = await readState();
+    migrateDraftReviewVersions(state);
+    const draft = state.draftReviews.find(
+      (item) => item.id === draftReviewId && item.ownerId === ownerId,
+    );
+    if (!draft) return null;
+    const versions = state.draftReviewVersions
+      .filter((item) => item.draftReviewId === draftReviewId)
+      .sort((a, b) => a.versionNumber - b.versionNumber);
+    const requestedVersionId =
+      options?.versionId ||
+      draft.currentVersionId ||
+      versions.at(-1)?.id ||
+      null;
+    const viewing =
+      versions.find((item) => item.id === requestedVersionId) ??
+      versions.at(-1) ??
+      null;
+    const viewDraft: DraftReview = viewing
+      ? {
+          ...draft,
+          originalFilename: viewing.originalFilename,
+          storagePath: viewing.storagePath,
+          mimeType: viewing.mimeType,
+          fileSize: viewing.fileSize,
+          durationSeconds: viewing.durationSeconds,
+          width: viewing.width,
+          height: viewing.height,
+          fps: viewing.fps,
+          coverPath: viewing.coverPath,
+          coverSource: viewing.coverSource,
+          coverFrameSecond: viewing.coverFrameSecond,
+          evidencePath: viewing.evidencePath,
+          status: viewing.status,
+          progress: viewing.progress,
+          currentStep: viewing.currentStep,
+          errorMessage: viewing.errorMessage,
+          completedAt: viewing.completedAt,
+          currentVersionId: viewing.id,
+        }
+      : draft;
+    const result = viewing
+      ? state.draftResults.find(
+          (item) => item.draftReviewVersionId === viewing.id,
+        ) ?? null
+      : null;
+    const baselineRecords = draft.baselineImportId
+      ? state.records.filter((item) => item.importId === draft.baselineImportId)
+      : state.records;
+    return {
+      draft: viewDraft,
+      result,
+      versions: versions.map((item) => ({
+        id: item.id,
+        versionNumber: item.versionNumber,
+        status: item.status,
+        createdAt: item.createdAt,
+        completedAt: item.completedAt,
+        originalFilename: item.originalFilename,
+      })),
+      viewingVersionId: viewing?.id ?? null,
+      baseline: calculateAccountBaseline(baselineRecords),
+      analysisMode:
+        result?.provider === "mock"
+          ? ("draft_mock" as const)
+          : result?.provider === "dashscope"
+            ? ("draft_dashscope" as const)
+            : ("draft_provider" as const),
+    };
+  }
+
+  async createDraftReview(
+    ownerId: string,
+    draft: DraftReview,
+  ): Promise<DraftReview> {
+    return mutate((state) => {
+      draft.ownerId = ownerId;
+      const latestImport = [...state.imports]
+        .filter((item) => item.ownerId === ownerId && item.status === "imported")
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      draft.baselineImportId = latestImport?.id ?? null;
+      const versionId = draft.currentVersionId || createId();
+      draft.currentVersionId = versionId;
+      draft.versionCount = draft.versionCount || 1;
+      state.draftReviewVersions.push(versionFromDraftFields(draft, versionId, 1));
+      state.draftReviews.push(draft);
+      return draft;
+    });
+  }
+
+  async addDraftReviewVersion(
+    ownerId: string,
+    draftReviewId: string,
+    version: DraftReviewVersion,
+    meta?: { title?: string | null; goal?: string | null; tags?: string[] },
+  ): Promise<DraftReview | null> {
+    return mutate((state) => {
+      migrateDraftReviewVersions(state);
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      const versions = state.draftReviewVersions.filter(
+        (item) => item.draftReviewId === draftReviewId,
+      );
+      const gate = canAddDraftVersion(versions, draft.status);
+      if (!gate.ok) {
+        throw Object.assign(new Error(gate.error), { status: gate.status });
+      }
+      if (meta?.title !== undefined) draft.title = meta.title;
+      if (meta?.goal !== undefined) draft.goal = meta.goal;
+      if (meta?.tags !== undefined) draft.tags = meta.tags;
+      state.draftReviewVersions.push(version);
+      applyVersionToDraft(draft, version, versions.length + 1);
+      return draft;
+    });
+  }
+
+  async updateDraftReview(
+    ownerId: string,
+    draftReviewId: string,
+    patch: Partial<DraftReview>,
+  ): Promise<DraftReview | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      const safePatch = { ...patch };
+      delete safePatch.id;
+      delete safePatch.ownerId;
+      Object.assign(draft, safePatch);
+      const version = draft.currentVersionId
+        ? state.draftReviewVersions.find(
+            (item) => item.id === draft.currentVersionId,
+          )
+        : null;
+      if (version) {
+        const versionFields: Array<keyof DraftReviewVersion> = [
+          "status",
+          "progress",
+          "currentStep",
+          "errorMessage",
+          "evidencePath",
+          "durationSeconds",
+          "completedAt",
+          "coverPath",
+          "coverSource",
+          "coverFrameSecond",
+          "storagePath",
+          "originalFilename",
+          "mimeType",
+          "fileSize",
+          "width",
+          "height",
+          "fps",
+        ];
+        for (const key of versionFields) {
+          if (key in safePatch) {
+            (version as unknown as Record<string, unknown>)[key] =
+              (safePatch as unknown as Record<string, unknown>)[key] ?? null;
+          }
+        }
+      }
+      return draft;
+    });
+  }
+
+  async updateDraftReviewVersion(
+    ownerId: string,
+    draftReviewId: string,
+    versionId: string,
+    patch: Partial<DraftReviewVersion>,
+  ): Promise<DraftReviewVersion | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      const version = state.draftReviewVersions.find(
+        (item) => item.id === versionId && item.draftReviewId === draftReviewId,
+      );
+      if (!draft || !version) return null;
+      const safePatch = { ...patch };
+      delete safePatch.id;
+      delete safePatch.draftReviewId;
+      Object.assign(version, safePatch);
+      if (draft.currentVersionId === versionId) {
+        applyVersionToDraft(
+          draft,
+          version,
+          state.draftReviewVersions.filter(
+            (item) => item.draftReviewId === draftReviewId,
+          ).length,
+        );
+      }
+      return version;
+    });
+  }
+
+  async deleteDraftReview(ownerId: string, draftReviewId: string): Promise<boolean> {
+    let paths: Array<string | null> = [];
+    const removed = await mutate((state) => {
+      const index = state.draftReviews.findIndex(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (index < 0) return false;
+      const versions = state.draftReviewVersions.filter(
+        (item) => item.draftReviewId === draftReviewId,
+      );
+      const briefs = state.draftCoverBriefs.filter(
+        (item) => item.draftReviewId === draftReviewId,
+      );
+      paths = [
+        ...versions.flatMap((item) => [
+          item.storagePath,
+          item.coverPath,
+          item.evidencePath,
+        ]),
+        ...briefs.map((item) => item.backgroundPath),
+      ];
+      state.draftReviews.splice(index, 1);
+      state.draftReviewVersions = state.draftReviewVersions.filter(
+        (item) => item.draftReviewId !== draftReviewId,
+      );
+      state.draftResults = state.draftResults.filter(
+        (item) => item.draftReviewId !== draftReviewId,
+      );
+      state.draftCoverBriefs = state.draftCoverBriefs.filter(
+        (item) => item.draftReviewId !== draftReviewId,
+      );
+      return true;
+    });
+    if (removed) await deletePrivateFiles(paths);
+    return removed;
+  }
+
+  async deleteDraftReviewVersion(
+    ownerId: string,
+    draftReviewId: string,
+    versionId: string,
+  ): Promise<DraftReview | null> {
+    let paths: Array<string | null> = [];
+    const draft = await mutate((state) => {
+      migrateDraftReviewVersions(state);
+      const session = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!session) return null;
+      const versions = state.draftReviewVersions.filter(
+        (item) => item.draftReviewId === draftReviewId,
+      );
+      if (versions.length <= 1) {
+        throw Object.assign(
+          new Error("至少保留一个版本；删除整条审片请用删除审片"),
+          { status: 422 },
+        );
+      }
+      const version = versions.find((item) => item.id === versionId);
+      if (!version) return null;
+      paths = [version.storagePath, version.coverPath, version.evidencePath];
+      state.draftReviewVersions = state.draftReviewVersions.filter(
+        (item) => item.id !== versionId,
+      );
+      state.draftResults = state.draftResults.filter(
+        (item) => item.draftReviewVersionId !== versionId,
+      );
+      state.draftCoverBriefs = state.draftCoverBriefs.filter(
+        (item) => item.versionId !== versionId,
+      );
+      const remaining = state.draftReviewVersions
+        .filter((item) => item.draftReviewId === draftReviewId)
+        .sort((a, b) => a.versionNumber - b.versionNumber);
+      applyVersionToDraft(session, remaining.at(-1)!, remaining.length);
+      return session;
+    });
+    if (draft) await deletePrivateFiles(paths);
+    return draft;
+  }
+
+  async saveDraftReviewResult(
+    ownerId: string,
+    draftReviewId: string,
+    result: DraftReviewResult,
+  ): Promise<DraftReviewResult | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      const existing = state.draftResults.find(
+        (item) => item.draftReviewVersionId === result.draftReviewVersionId,
+      );
+      if (existing) {
+        const editedMarkdown = existing.editedMarkdown;
+        Object.assign(existing, result, { editedMarkdown });
+        return existing;
+      }
+      state.draftResults.push(result);
+      return result;
+    });
+  }
+
+  async processDraftReview(
+    ownerId: string,
+    draftReviewId: string,
+    versionId?: string,
+  ): Promise<DraftReview | null> {
+    const existing = await this.getDraftReview(ownerId, draftReviewId);
+    if (!existing) return null;
+    const targetVersionId =
+      versionId || existing.viewingVersionId || existing.draft.currentVersionId;
+    if (!targetVersionId) return null;
+
+    await this.updateDraftReviewVersion(ownerId, draftReviewId, targetVersionId, {
+      status: "processing",
+      progress: 20,
+      currentStep: "analyzing",
+      errorMessage: null,
+    });
+    const payload = await this.getDraftReview(ownerId, draftReviewId, {
+      versionId: targetVersionId,
+    });
+    if (!payload) return null;
+
+    try {
+      const state = await readState();
+      const version = state.draftReviewVersions.find(
+        (item) => item.id === targetVersionId,
+      );
+      const durationSeconds = Math.max(
+        0.1,
+        payload.draft.durationSeconds ?? 60,
+      );
+      const board = payload.draft.coverPath ?? "";
+      const evidence: DraftEvidenceManifest = {
+        durationSeconds,
+        openingBoard: board,
+        fullBoard: board,
+        combinedBoard: board,
+        sceneCutSeconds: [],
+        silenceRanges: [],
+        title: payload.draft.title,
+        goal: payload.draft.goal,
+        tags: payload.draft.tags ?? [],
+      };
+      const baselineRecords = payload.draft.baselineImportId
+        ? state.records.filter(
+            (item) => item.importId === payload.draft.baselineImportId,
+          )
+        : state.records;
+      const baseline =
+        baselineRecords.length > 0
+          ? calculateAccountBaseline(baselineRecords)
+          : null;
+      const similarVideos = findSimilarVideosByTags(baselineRecords, {
+        tags: payload.draft.tags ?? [],
+        title: payload.draft.title,
+      });
+      const provider = resolveDraftReviewProvider();
+      const diagnosis = await provider.analyze({
+        evidence,
+        baseline,
+        similarVideos,
+      });
+      const previousVersion = version
+        ? state.draftReviewVersions.find(
+            (item) =>
+              item.draftReviewId === draftReviewId &&
+              item.versionNumber === version.versionNumber - 1,
+          )
+        : null;
+      const previousResult = previousVersion
+        ? state.draftResults.find(
+            (item) => item.draftReviewVersionId === previousVersion.id,
+          )
+        : null;
+      const changelog =
+        version && version.versionNumber > 1
+          ? buildVersionChangelog(previousResult?.result ?? null, diagnosis)
+          : null;
+      const now = new Date().toISOString();
+      await this.saveDraftReviewResult(ownerId, draftReviewId, {
+        id: createId(),
+        draftReviewId,
+        draftReviewVersionId: targetVersionId,
+        result: diagnosis,
+        editedMarkdown: null,
+        provider: provider.resultProviderName ?? provider.name,
+        changelog,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await this.updateDraftReviewVersion(ownerId, draftReviewId, targetVersionId, {
+        status: "completed",
+        progress: 100,
+        currentStep: "completed",
+        evidencePath: board || null,
+        completedAt: now,
+      });
+    } catch (error) {
+      await this.updateDraftReviewVersion(ownerId, draftReviewId, targetVersionId, {
+        status: "failed",
+        progress: 100,
+        currentStep: "failed",
+        errorMessage: error instanceof Error ? error.message : "审片分析失败",
+        completedAt: new Date().toISOString(),
+      });
+    }
+    return (await this.getDraftReview(ownerId, draftReviewId))?.draft ?? null;
+  }
+
+  async saveDraftEditedReport(
+    ownerId: string,
+    draftReviewId: string,
+    markdown: string,
+    versionId?: string,
+  ): Promise<DraftReviewResult | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      const targetVersionId = versionId || draft.currentVersionId;
+      const result = state.draftResults.find(
+        (item) => item.draftReviewVersionId === targetVersionId,
+      );
+      if (!result) return null;
+      result.editedMarkdown = markdown;
+      result.updatedAt = new Date().toISOString();
+      return result;
+    });
+  }
+
+  async draftReportMarkdown(
+    ownerId: string,
+    draftReviewId: string,
+    versionId?: string,
+  ): Promise<string | null> {
+    const payload = await this.getDraftReview(ownerId, draftReviewId, { versionId });
+    if (!payload?.result) return null;
+    return (
+      payload.result.editedMarkdown ??
+      diagnosisToMarkdown(
+        payload.draft.title ?? payload.draft.originalFilename,
+        payload.draft.createdAt,
+        payload.result.result,
+        payload.analysisMode,
+      )
+    );
+  }
+}
+class FullSitesRepository extends DraftSitesRepository {
+  async listDraftCoverBriefs(
+    ownerId: string,
+    draftReviewId: string,
+  ): Promise<DraftCoverBrief[]> {
+    const state = await readState();
+    const draft = state.draftReviews.find(
+      (item) => item.id === draftReviewId && item.ownerId === ownerId,
+    );
+    if (!draft) return [];
+    return state.draftCoverBriefs
+      .filter((item) => item.draftReviewId === draftReviewId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<DraftCoverBrief | null> {
+    const state = await readState();
+    const draft = state.draftReviews.find(
+      (item) => item.id === draftReviewId && item.ownerId === ownerId,
+    );
+    if (!draft) return null;
+    return (
+      state.draftCoverBriefs.find(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      ) ?? null
+    );
+  }
+
+  async createDraftCoverBrief(
+    ownerId: string,
+    brief: DraftCoverBrief,
+  ): Promise<DraftCoverBrief | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === brief.draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return null;
+      state.draftCoverBriefs.push(brief);
+      return brief;
+    });
+  }
+
+  async updateDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+    patch: Partial<DraftCoverBrief>,
+  ): Promise<DraftCoverBrief | null> {
+    return mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      const brief = state.draftCoverBriefs.find(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      );
+      if (!draft || !brief) return null;
+      const safePatch = { ...patch };
+      delete safePatch.id;
+      delete safePatch.draftReviewId;
+      Object.assign(brief, safePatch);
+      return brief;
+    });
+  }
+
+  async processDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<DraftCoverBrief | null> {
+    const brief = await this.getDraftCoverBrief(ownerId, draftReviewId, briefId);
+    if (!brief) return null;
+    const payload = await this.getDraftReview(ownerId, draftReviewId, {
+      versionId: brief.versionId,
+    });
+    if (!payload) return null;
+    const context: CoverBriefContext = {
+      title: payload.draft.title,
+      tags: payload.draft.tags ?? [],
+      goal: payload.draft.goal,
+      diagnosisSummary: payload.result?.result.executiveSummary ?? null,
+      problemCategories: (payload.result?.result.primaryProblems ?? []).map(
+        (item) => item.category,
+      ),
+    };
+    await this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+      status: "processing",
+      errorMessage: null,
+    });
+    try {
+      const provider = resolveCoverBriefProvider();
+      const output = await provider.generate({
+        backgroundPath: brief.backgroundPath,
+        backgroundMimeType: brief.backgroundMimeType,
+        userDescription: brief.userDescription,
+        context,
+        options: brief.options ?? null,
+      });
+      return this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+        imagePrompt: output.pastePrompt,
+        titles: output.titles,
+        layoutNotes: null,
+        provider: provider.name,
+        status: "completed",
+        errorMessage: null,
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      return this.updateDraftCoverBrief(ownerId, draftReviewId, briefId, {
+        status: "failed",
+        errorMessage:
+          error instanceof Error ? error.message : "封面方案生成失败",
+        completedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  async deleteDraftCoverBrief(
+    ownerId: string,
+    draftReviewId: string,
+    briefId: string,
+  ): Promise<boolean> {
+    let backgroundPath: string | null = null;
+    const removed = await mutate((state) => {
+      const draft = state.draftReviews.find(
+        (item) => item.id === draftReviewId && item.ownerId === ownerId,
+      );
+      if (!draft) return false;
+      const index = state.draftCoverBriefs.findIndex(
+        (item) => item.id === briefId && item.draftReviewId === draftReviewId,
+      );
+      if (index < 0) return false;
+      backgroundPath = state.draftCoverBriefs[index]!.backgroundPath;
+      state.draftCoverBriefs.splice(index, 1);
+      return true;
+    });
+    if (removed) await deletePrivateFiles([backgroundPath]);
+    return removed;
+  }
+}
+export const repository = new FullSitesRepository();
 
 export function requestOwnerId(request: Request): string {
   return ownerIdFromRequest(request);

@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { diagnosisResultSchema } from "@video-diagnosis/shared-types";
 import type { DiagnosisResult } from "@video-diagnosis/shared-types";
@@ -13,6 +12,7 @@ import {
   formatSimilarVideosForPrompt,
   type SimilarVideoSummary,
 } from "@/lib/draft-review/similar-videos";
+import { readPrivateFileAsDataUrl } from "@/lib/storage/storage";
 
 function env(name: string, fallback = ""): string {
   return (process.env[name] ?? fallback).trim();
@@ -47,12 +47,8 @@ function mimeForImage(filePath: string): string {
 }
 
 async function imageToDataUrl(filePath: string): Promise<string | null> {
-  try {
-    const buffer = await fs.promises.readFile(filePath);
-    return `data:${mimeForImage(filePath)};base64,${buffer.toString("base64")}`;
-  } catch {
-    return null;
-  }
+  if (!filePath) return null;
+  return readPrivateFileAsDataUrl(filePath, mimeForImage(filePath));
 }
 
 function baselineFacts(baseline: AccountBaseline | null): string[] {

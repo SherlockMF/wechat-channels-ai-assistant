@@ -4,7 +4,7 @@ import { repository } from "@/lib/data/repository";
 import {
   servePrivateFile,
   verifyAssetSignature,
-} from "@/lib/storage/private-storage";
+} from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 type Context = {

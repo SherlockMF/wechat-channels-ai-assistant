@@ -20,7 +20,7 @@ loadEnvConfig(appDir);
 const localAliases = {
   "@/lib/data/repository": "./lib/data/local-runtime-repository.ts",
   "@/lib/data/migration": "./lib/data/local-migration.ts",
-  "@/lib/storage/storage": "./lib/storage/private-storage.ts",
+  "@/lib/storage/storage": "./lib/storage/local-storage-runtime.ts",
 };
 
 const nextConfig: NextConfig = {

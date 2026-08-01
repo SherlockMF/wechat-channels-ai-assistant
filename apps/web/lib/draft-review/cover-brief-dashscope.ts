@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { extractJsonObject } from "@/lib/draft-review/dashscope-provider";
 import {
   MockCoverBriefProvider,
@@ -8,6 +7,7 @@ import {
   type CoverBriefProvider,
   parseCoverBriefOutput,
 } from "@/lib/draft-review/cover-brief-provider";
+import { readPrivateFileAsDataUrl } from "@/lib/storage/storage";
 
 function env(name: string, fallback = ""): string {
   return (process.env[name] ?? fallback).trim();
@@ -38,8 +38,11 @@ async function imageToDataUrl(
   filePath: string,
   mimeType: string,
 ): Promise<string> {
-  const buffer = await fs.promises.readFile(filePath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  const dataUrl = await readPrivateFileAsDataUrl(filePath, mimeType);
+  if (!dataUrl) {
+    throw new Error("背景图不存在或不可读");
+  }
+  return dataUrl;
 }
 
 export class DashScopeCoverBriefProvider implements CoverBriefProvider {
