@@ -175,7 +175,9 @@ export function ScriptList() {
                 </p>
                 <p className="text-[11px] text-[#88948d]">
                   更新于 {new Date(item.updatedAt).toLocaleString()}
-                  {item.provider ? ` · ${item.provider}` : ""}
+                  {item.provider
+                    ? ` · ${item.provider === "mock-degraded" ? "mock（已降级）" : item.provider}`
+                    : ""}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">

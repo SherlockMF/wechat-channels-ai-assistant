@@ -25,6 +25,21 @@
 - Zod/Pydantic 结构化诊断；无 AI 时保留规则诊断。
 - 视频诊断页面分开显示数据事实、合理推断与执行动作。
 - 报告编辑、保存、复制和 Markdown 导出；刷新后数据仍保留。
+- **脚本工作台**（`/scripts`）：按制作形态与业务主题生成口播或跟拍大纲，支持已有稿保留、再生成新记录、全文复制。
+- 新建脚本必选「已拍摄 / 未拍摄」：已拍摄产出素材描述 + 剪辑建议；未拍摄产出拍摄分镜 + 剪辑建议；全文末尾含「拍摄与剪辑指导」。
+- DashScope 不可用或返回无效 JSON 时降级为本地模板，并在详情标为 `mock（已降级）`，避免静默伪造成功。
+- 参考片仅使用当前 owner 的导入视频；`internalNote` 不进入可复制全文。
+
+## 脚本工作台
+
+入口：`http://localhost:3000/scripts`。
+
+- 创建：`/scripts/new`，选择形态、主题、拍摄状态后生成。
+- 详情：结构化预览 + 可编辑全文；手工改全文后上方结构化区块可能不同步，复制以全文为准。
+- 再生成：保留原记录，新建一条。
+- Provider：配置 `DASHSCOPE_API_KEY`（或兼容的 `LLM_API_KEY` / `VISION_API_KEY`）时走 DashScope；否则用确定性 mock。
+
+Sites / D1 云端路径支持脚本草稿持久化；PostgreSQL（`APP_MODE=REAL`）当前**不**支持脚本工作台，请继续用 LOCAL 或 Sites 部署。
 
 ## 运行模式
 
@@ -91,7 +106,7 @@ docker compose up --build
 - `DATABASE_URL`：PostgreSQL 连接串。
 - `PRIVATE_STORAGE_ROOT`：私有视频目录，不应挂到公开静态目录。
 - `SIGNED_URL_SECRET`：签名地址密钥。
-- `SPEECH_*`、`VISION_*`、`LLM_*`：Provider 地址、模型与密钥。
+- `SPEECH_*`、`VISION_*`、`LLM_*`、`DASHSCOPE_*`：Provider 地址、模型与密钥（脚本工作台可复用 DashScope 兼容密钥）。
 - `MAX_VIDEO_FILE_MB`、`MAX_VIDEO_FILES`：上传限制。
 
 日志不得记录这些密钥。系统不处理微信 Cookie，不实现登录、发布、评论、私信或关注。
@@ -105,7 +120,17 @@ npm.cmd run build
 python -m pytest apps/worker/tests
 ```
 
-自动化测试覆盖日期、百分比、空值、视频 ID 去重、标题清洗、匹配阈值、歧义匹配、发布时间排序、零播放互动率、AI Schema 与无留存约束。
+自动化测试覆盖日期、百分比、空值、视频 ID 去重、标题清洗、匹配阈值、歧义匹配、发布时间排序、零播放互动率、AI Schema、脚本工作台 productionGuide 归一化与无留存约束。
+
+## 请勿提交本地数据
+
+以下目录/文件已在 `.gitignore` 中忽略，**不要**手动 `git add -f` 推上仓库：
+
+- `.data/`（含 `local-state.json`、上传与备份）
+- `videoes/`、`*.xlsx`、`outputs/*`
+- `.env` 与各类密钥
+
+源工作簿与视频请留在本机只读路径；分析状态仅写入本地 `.data`。
 
 ## 真实限制
 

@@ -1,26 +1,37 @@
 import type {
-  ScriptDraftFormat,
-  ScriptDraftInput,
   ScriptDraftOutput,
   ScriptDraftProcessKind,
-  ScriptDraftSmartSubTopic,
   ScriptDraftTopic,
 } from "@video-diagnosis/shared-types";
 import { isKouboFormat, smartSubTopicLabels, topicLabel } from "@/lib/script-workbench/catalog";
 import { shortHook } from "@/lib/script-workbench/display";
+import {
+  buildProductionGuide,
+  guideSectionsFromOutput,
+  type ScriptGenerateRequest,
+} from "@/lib/script-workbench/production-guide";
 import { outputToPlainText } from "@/lib/script-workbench/plain-text";
 
-export interface ScriptGenerateRequest {
-  format: ScriptDraftFormat;
-  topic: ScriptDraftTopic | null;
-  subTopics: ScriptDraftSmartSubTopic[];
-  processKinds: ScriptDraftProcessKind[];
-  input: ScriptDraftInput;
-  referenceHints?: string[];
-}
+export type { ScriptGenerateRequest } from "@/lib/script-workbench/production-guide";
 
 function topicPhrase(topic: ScriptDraftTopic | null): string {
   return topicLabel(topic);
+}
+
+function withProductionGuide(
+  request: ScriptGenerateRequest,
+  output: ScriptDraftOutput,
+): ScriptDraftOutput {
+  const next: ScriptDraftOutput = {
+    ...output,
+    productionGuide: buildProductionGuide(
+      request,
+      guideSectionsFromOutput(output),
+    ),
+    plainText: "",
+  };
+  next.plainText = outputToPlainText(next);
+  return next;
 }
 
 function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
@@ -129,8 +140,7 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
       `可参考历史片：${request.referenceHints.slice(0, 2).join("；")}`,
     );
   }
-  output.plainText = outputToPlainText(output);
-  return output;
+  return withProductionGuide(request, output);
 }
 
 function processLabels(kinds: ScriptDraftProcessKind[]): string {
@@ -187,8 +197,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
         : ["未选业务主题：按生活流剪即可"],
       plainText: "",
     };
-    output.plainText = outputToPlainText(output);
-    return output;
+    return withProductionGuide(request, output);
   }
 
   if (format === "service_process") {
@@ -248,8 +257,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
       ],
       plainText: "",
     };
-    output.plainText = outputToPlainText(output);
-    return output;
+    return withProductionGuide(request, output);
   }
 
   if (format === "hydro_site") {
@@ -293,8 +301,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
       gapsOrWarnings: ["补拍缺失的标准点特写；注意安全与客户隐私"],
       plainText: "",
     };
-    output.plainText = outputToPlainText(output);
-    return output;
+    return withProductionGuide(request, output);
   }
 
   // project_finish
@@ -339,15 +346,11 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
         subtitle: "恒远智能",
       },
     ],
-    gapsOrWarnings: [
-      input.internalNote
-        ? `内部备注（不对外）：${input.internalNote}`
-        : "缺镜头就补拍功能演示与空间建立感",
-    ],
+    // internalNote 仅存于 input，不进入可复制 gaps/plainText
+    gapsOrWarnings: ["缺镜头就补拍功能演示与空间建立感"],
     plainText: "",
   };
-  output.plainText = outputToPlainText(output);
-  return output;
+  return withProductionGuide(request, output);
 }
 
 export function buildMockScriptOutput(

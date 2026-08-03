@@ -1,4 +1,4 @@
-import { scriptDraftOutputSchema } from "@video-diagnosis/shared-types";
+import { scriptDraftOutputLooseSchema } from "@video-diagnosis/shared-types";
 import type { ScriptDraftOutput } from "@video-diagnosis/shared-types";
 import {
   formatLabel,
@@ -10,7 +10,11 @@ import {
   buildMockScriptOutput,
   type ScriptGenerateRequest,
 } from "@/lib/script-workbench/mock-generate";
-import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import { resolveShootStatus } from "@/lib/script-workbench/plain-text";
+import {
+  finalizeScriptOutput,
+  markDegradedOutput,
+} from "@/lib/script-workbench/production-guide";
 import type { ScriptProvider } from "@/lib/script-workbench/provider";
 
 function env(name: string, fallback = ""): string {
@@ -41,6 +45,12 @@ function llmModel(): string {
 }
 
 function schemaHint(koubo: boolean): string {
+  const guide = `"productionGuide": {
+    "shootStatus": "shot" | "unshot",
+    "editGuidance": string[] (3-6 条可执行剪辑建议),
+    "materials": [{"section": string, "description": string}] (仅 shot 填，否则 []),
+    "storyboard": [{"order": number, "shot": string, "camera": string, "durationHint": string, "voiceCue": string}] (仅 unshot 填，否则 [])
+  }`;
   if (koubo) {
     return `只输出一个 JSON 对象，不要 Markdown。字段：
 {
@@ -54,6 +64,7 @@ function schemaHint(koubo: boolean): string {
   "positioning": null,
   "timeline": [],
   "gapsOrWarnings": string[],
+  ${guide},
   "plainText": string
 }`;
   }
@@ -69,6 +80,7 @@ function schemaHint(koubo: boolean): string {
   "positioning": string,
   "timeline": [{"order": number, "shoot": string, "say": string, "subtitle": string}],
   "gapsOrWarnings": string[],
+  ${guide},
   "plainText": string
 }`;
 }
@@ -94,6 +106,7 @@ export class DashScopeScriptProvider implements ScriptProvider {
   async generate(request: ScriptGenerateRequest): Promise<ScriptDraftOutput> {
     this.actualProviderName = "dashscope";
     const koubo = isKouboFormat(request.format);
+    const shootStatus = resolveShootStatus(request.input);
     const prompt = [
       "你是视频号脚本助手，服务开远本地智能家居/净水/水电公司「恒远」。",
       `制作形态：${formatLabel(request.format, request.input.formatOther)}`,
@@ -108,6 +121,13 @@ export class DashScopeScriptProvider implements ScriptProvider {
       request.input.existingScript?.trim()
         ? `用户已写好的当前脚本（优先保留其口播与分镜结构，不要大段重写；主要补标题、标签、穿插素材、字幕要点、备选开头）：\n${request.input.existingScript.trim()}`
         : "用户未提供当前脚本：请根据选题新写口播稿。",
+      `拍摄状态：${shootStatus === "shot" ? "已拍摄" : "未拍摄"}`,
+      shootStatus === "shot"
+        ? request.input.materialNotes?.trim()
+          ? `用户手头素材（请贴合）：${request.input.materialNotes.trim()}`
+          : "用户未提供手头素材：请按文案推断可用素材描述（materials），storyboard 必须为空数组。"
+        : "未拍摄：请给出可执行拍摄分镜（storyboard），materials 必须为空数组。",
+      "必须输出 productionGuide：两种状态都要有 editGuidance（节奏/转场/字幕卡点/BGM/删补）；shot 填 materials、unshot 填 storyboard。",
       request.input.sellingPoints
         ? `强调卖点：${request.input.sellingPoints}`
         : "",
@@ -149,14 +169,11 @@ export class DashScopeScriptProvider implements ScriptProvider {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const content = payload.choices?.[0]?.message?.content ?? "";
-      const parsed = scriptDraftOutputSchema.parse(extractJson(content));
-      return {
-        ...parsed,
-        plainText: parsed.plainText?.trim() || outputToPlainText(parsed),
-      };
+      const parsed = scriptDraftOutputLooseSchema.parse(extractJson(content));
+      return finalizeScriptOutput(request, parsed as ScriptDraftOutput);
     } catch {
-      this.actualProviderName = "mock";
-      return buildMockScriptOutput(request);
+      this.actualProviderName = "mock-degraded";
+      return markDegradedOutput(buildMockScriptOutput(request));
     }
   }
 }

@@ -83,6 +83,8 @@ export function ScriptCreateForm() {
   const [mustShoot, setMustShoot] = useState("");
   const [dayPlan, setDayPlan] = useState("");
   const [internalNote, setInternalNote] = useState("");
+  const [shootStatus, setShootStatus] = useState<"shot" | "unshot">("unshot");
+  const [materialNotes, setMaterialNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -163,7 +165,10 @@ export function ScriptCreateForm() {
     }
     setBusy(true);
     try {
-      const input: Record<string, unknown> = { idea: idea.trim() };
+      const input: Record<string, unknown> = {
+        idea: idea.trim(),
+        shootStatus,
+      };
       if (formatPayload.formatOther) {
         input.formatOther = formatPayload.formatOther;
       }
@@ -171,6 +176,9 @@ export function ScriptCreateForm() {
         input.topicOther = topicPayload.topicOther;
       }
       if (existingScript.trim()) input.existingScript = existingScript.trim();
+      if (shootStatus === "shot" && materialNotes.trim()) {
+        input.materialNotes = materialNotes.trim();
+      }
       if (koubo) {
         if (sellingPoints.trim()) input.sellingPoints = sellingPoints.trim();
         if (targetSeconds.trim()) {
@@ -455,6 +463,50 @@ export function ScriptCreateForm() {
             />
           </label>
         ) : null}
+
+        <div className="space-y-3 rounded-xl border border-line bg-[#f7faf8] p-4">
+          <p className="text-xs font-semibold text-[#52615a]">拍摄状态</p>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                { value: "unshot" as const, label: "未拍摄" },
+                { value: "shot" as const, label: "已拍摄" },
+              ] as const
+            ).map((option) => {
+              const active = shootStatus === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                    active
+                      ? "border-pine bg-[#eaf5ef] text-pine"
+                      : "border-line bg-white text-[#52615a]"
+                  }`}
+                  onClick={() => setShootStatus(option.value)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs font-normal text-[#88948d]">
+            {shootStatus === "shot"
+              ? "将给出素材描述与剪辑建议；可选手头素材说明"
+              : "将给出拍摄分镜与剪辑建议"}
+          </p>
+          {shootStatus === "shot" ? (
+            <label className="grid gap-1 text-xs font-semibold text-[#52615a]">
+              手头素材描述（可选）
+              <textarea
+                className="min-h-20 rounded-lg border border-line bg-white px-3 py-2 text-sm"
+                value={materialNotes}
+                placeholder="例如：客厅全景、面板操作特写、窗帘开合对比各一段…"
+                onChange={(event) => setMaterialNotes(event.target.value)}
+              />
+            </label>
+          ) : null}
+        </div>
 
         {error ? <p className="text-sm font-medium text-coral">{error}</p> : null}
 

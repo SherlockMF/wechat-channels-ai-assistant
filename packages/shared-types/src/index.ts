@@ -428,11 +428,104 @@ export const scriptDraftProcessKindSchema = z.enum([
 
 export const scriptDraftStatusSchema = z.enum(["draft", "ready"]);
 export const scriptDraftPipelineSchema = z.enum(["koubo", "follow"]);
+export const scriptShootStatusSchema = z.enum(["shot", "unshot"]);
+
+export const scriptProductionGuideSchema = z
+  .object({
+    shootStatus: scriptShootStatusSchema,
+    /** 剪辑建议：节奏、转场、字幕卡点、BGM、删补等 */
+    editGuidance: z.array(z.string()),
+    /** 已拍摄：按段落的视频素材描述；未拍摄为空数组 */
+    materials: z.array(
+      z.object({
+        section: z.string(),
+        description: z.string(),
+      }),
+    ),
+    /** 未拍摄：拍摄分镜；已拍摄为空数组 */
+    storyboard: z.array(
+      z.object({
+        order: z.number().int(),
+        shot: z.string(),
+        camera: z.string(),
+        durationHint: z.string(),
+        voiceCue: z.string(),
+      }),
+    ),
+  })
+  .superRefine((guide, ctx) => {
+    if (guide.shootStatus === "shot" && guide.storyboard.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "已拍摄状态不应包含 storyboard",
+        path: ["storyboard"],
+      });
+    }
+    if (guide.shootStatus === "unshot" && guide.materials.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "未拍摄状态不应包含 materials",
+        path: ["materials"],
+      });
+    }
+  });
+
+/** LLM 解析用：允许脏 productionGuide，随后由 finalize 归一化 */
+export const scriptDraftOutputLooseSchema = z.object({
+  pipeline: scriptDraftPipelineSchema,
+  titles: z.array(z.string()),
+  tags: z.array(z.string()),
+  script: z.string(),
+  brollCues: z.array(
+    z.object({
+      section: z.string(),
+      cue: z.string(),
+    }),
+  ),
+  subtitleBeats: z.array(z.string()),
+  altHooks: z.array(z.string()),
+  positioning: z.string().nullable(),
+  timeline: z.array(
+    z.object({
+      order: z.number().int(),
+      shoot: z.string(),
+      say: z.string(),
+      subtitle: z.string(),
+    }),
+  ),
+  gapsOrWarnings: z.array(z.string()),
+  productionGuide: z
+    .object({
+      shootStatus: scriptShootStatusSchema,
+      editGuidance: z.array(z.string()),
+      materials: z.array(
+        z.object({
+          section: z.string(),
+          description: z.string(),
+        }),
+      ),
+      storyboard: z.array(
+        z.object({
+          order: z.number().int(),
+          shot: z.string(),
+          camera: z.string(),
+          durationHint: z.string(),
+          voiceCue: z.string(),
+        }),
+      ),
+    })
+    .optional(),
+  plainText: z.string(),
+});
 
 export const scriptDraftInputSchema = z.object({
   idea: z.string().min(1),
   /** 已写好的口播/分镜稿；有则优先润色与配素材，少重写 */
   existingScript: z.string().optional(),
+  /** 整片拍摄状态；缺省按未拍摄处理 */
+  shootStatus: scriptShootStatusSchema.optional(),
+  /** 已拍摄时可选：手头素材描述 */
+  materialNotes: z.string().optional(),
   sellingPoints: z.string().optional(),
   targetSeconds: z.number().int().positive().optional(),
   tone: z.enum(["casual", "dry", "other"]).optional(),
@@ -474,6 +567,8 @@ export const scriptDraftOutputSchema = z.object({
     }),
   ),
   gapsOrWarnings: z.array(z.string()),
+  /** 拍摄与剪辑指导；旧稿可缺省 */
+  productionGuide: scriptProductionGuideSchema.optional(),
   plainText: z.string(),
 });
 
@@ -487,6 +582,8 @@ export type ScriptDraftProcessKind = z.infer<
 >;
 export type ScriptDraftStatus = z.infer<typeof scriptDraftStatusSchema>;
 export type ScriptDraftPipeline = z.infer<typeof scriptDraftPipelineSchema>;
+export type ScriptShootStatus = z.infer<typeof scriptShootStatusSchema>;
+export type ScriptProductionGuide = z.infer<typeof scriptProductionGuideSchema>;
 export type ScriptDraftInput = z.infer<typeof scriptDraftInputSchema>;
 export type ScriptDraftOutput = z.infer<typeof scriptDraftOutputSchema>;
 

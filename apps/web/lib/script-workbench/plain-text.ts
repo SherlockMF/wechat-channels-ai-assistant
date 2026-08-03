@@ -1,4 +1,51 @@
-import type { ScriptDraftOutput } from "@video-diagnosis/shared-types";
+import type {
+  ScriptDraftInput,
+  ScriptDraftOutput,
+  ScriptProductionGuide,
+  ScriptShootStatus,
+} from "@video-diagnosis/shared-types";
+
+export function resolveShootStatus(
+  input: Pick<ScriptDraftInput, "shootStatus">,
+): ScriptShootStatus {
+  return input.shootStatus === "shot" ? "shot" : "unshot";
+}
+
+export function appendProductionGuidePlainText(
+  lines: string[],
+  guide: ScriptProductionGuide | undefined,
+): void {
+  if (!guide) return;
+  lines.push("");
+  lines.push("【拍摄与剪辑指导】");
+  lines.push(
+    `状态：${guide.shootStatus === "shot" ? "已拍摄" : "未拍摄"}`,
+  );
+  if (guide.shootStatus === "shot" && guide.materials.length) {
+    lines.push("");
+    lines.push("素材描述：");
+    for (const item of guide.materials) {
+      lines.push(`- ${item.section}：${item.description}`);
+    }
+  }
+  if (guide.shootStatus === "unshot" && guide.storyboard.length) {
+    lines.push("");
+    lines.push("拍摄分镜：");
+    for (const shot of guide.storyboard) {
+      lines.push(
+        `${shot.order}. ${shot.shot}｜${shot.camera}｜${shot.durationHint}`,
+      );
+      if (shot.voiceCue) lines.push(`   对应：${shot.voiceCue}`);
+    }
+  }
+  if (guide.editGuidance.length) {
+    lines.push("");
+    lines.push("剪辑建议：");
+    for (const tip of guide.editGuidance) {
+      lines.push(`- ${tip}`);
+    }
+  }
+}
 
 export function outputToPlainText(output: ScriptDraftOutput): string {
   const lines: string[] = [];
@@ -66,5 +113,15 @@ export function outputToPlainText(output: ScriptDraftOutput): string {
       }
     }
   }
+  appendProductionGuidePlainText(lines, output.productionGuide);
   return lines.join("\n").trim();
+}
+
+/** 全文是否与结构化字段重建结果不一致（手工改过） */
+export function plainTextDivergesFromStructured(
+  output: ScriptDraftOutput,
+): boolean {
+  const stored = (output.plainText ?? "").trim();
+  if (!stored) return false;
+  return stored !== outputToPlainText(output);
 }

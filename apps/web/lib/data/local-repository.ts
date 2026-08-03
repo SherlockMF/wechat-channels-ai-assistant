@@ -41,16 +41,19 @@ import {
 import { draftReviewStorageRoot } from "@/lib/storage/draft-review-storage";
 import { defaultTopicForFormat, topicRequired } from "@/lib/script-workbench/catalog";
 import {
-  preferScriptBody,
   resolveDraftListTitle,
   sanitizeGeneratedTitles,
   summarizeIdea,
 } from "@/lib/script-workbench/display";
-import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import {
+  finalizeScriptOutput,
+  sanitizeScriptInput,
+} from "@/lib/script-workbench/production-guide";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
 import {
   findScriptReferences,
   formatReferencesForPrompt,
+  recordsOwnedBy,
 } from "@/lib/script-workbench/references";
 import {
   buildLocalSourceState,
@@ -154,17 +157,28 @@ async function readState(): Promise<PersistedLocalState> {
 
 async function mutate<T>(operation: (state: AppState) => T | Promise<T>): Promise<T> {
   let result!: T;
-  mutationQueue = mutationQueue.then(async () => {
-    await fs.mkdir(dataRoot, { recursive: true });
-    const state = await readState();
-    result = await operation(state);
-    const temporaryPath = `${databasePath}.${process.pid}.tmp`;
-    await fs.writeFile(temporaryPath, JSON.stringify(state, null, 2), "utf8");
-    await fs.rename(temporaryPath, databasePath);
-    cachedState = state;
-    cachedDatabaseStamp = await databaseStamp();
+  let failure: unknown;
+  const run = mutationQueue.then(async () => {
+    try {
+      await fs.mkdir(dataRoot, { recursive: true });
+      const state = await readState();
+      result = await operation(state);
+      const temporaryPath = `${databasePath}.${process.pid}.tmp`;
+      await fs.writeFile(temporaryPath, JSON.stringify(state, null, 2), "utf8");
+      await fs.rename(temporaryPath, databasePath);
+      cachedState = state;
+      cachedDatabaseStamp = await databaseStamp();
+    } catch (error) {
+      failure = error;
+    }
   });
-  await mutationQueue;
+  // 吞掉失败，避免后续写入永久卡死
+  mutationQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  await run;
+  if (failure) throw failure;
   return result;
 }
 
@@ -1265,6 +1279,18 @@ export class LocalRepository {
         (item) => item.id === scriptId && item.ownerId === ownerId,
       );
       if (!draft) return null;
+      if (patch.input) {
+        patch = { ...patch, input: sanitizeScriptInput(patch.input) };
+      }
+      const nextStatus = patch.status ?? draft.status;
+      const nextOutput =
+        patch.output !== undefined ? patch.output : draft.output;
+      if (nextStatus === "ready" && nextOutput == null) {
+        throw Object.assign(
+          new Error("状态为可用时必须有完整输出内容"),
+          { status: 400 },
+        );
+      }
       Object.assign(draft, patch, { updatedAt: new Date().toISOString() });
       return draft;
     });
@@ -1302,32 +1328,32 @@ export class LocalRepository {
         status: 400,
       });
     }
+    const input = sanitizeScriptInput(params.input);
     const state = await readState();
     const refs = findScriptReferences(
-      state.records,
+      recordsOwnedBy(state.records, state.imports, ownerId),
       params.format,
       topic,
-      params.input.idea,
+      input.idea,
     );
     const provider = resolveScriptProvider();
-    let output = await provider.generate({
+    const request = {
       format: params.format,
       topic,
       subTopics: params.subTopics ?? [],
       processKinds: params.processKinds ?? [],
-      input: params.input,
+      input,
       referenceHints: formatReferencesForPrompt(refs),
-    });
-    output = preferScriptBody(output, params.input.existingScript);
-    output = {
-      ...output,
-      titles: sanitizeGeneratedTitles(output.titles, params.input.idea),
     };
-    output = { ...output, plainText: outputToPlainText(output) };
+    let output = await provider.generate(request);
+    output = finalizeScriptOutput(request, {
+      ...output,
+      titles: sanitizeGeneratedTitles(output.titles, input.idea),
+    });
 
     const ideaSummary = summarizeIdea({
-      idea: params.input.idea,
-      existingScript: params.input.existingScript,
+      idea: input.idea,
+      existingScript: input.existingScript,
     });
     const now = new Date().toISOString();
     const draft: ScriptDraft = {
@@ -1335,13 +1361,13 @@ export class LocalRepository {
       ownerId,
       format: params.format,
       topic,
-      formatOther: params.input.formatOther?.trim() || null,
-      topicOther: params.input.topicOther?.trim() || null,
+      formatOther: input.formatOther?.trim() || null,
+      topicOther: input.topicOther?.trim() || null,
       subTopics: params.subTopics ?? [],
       processKinds: params.processKinds ?? [],
       title: null,
       ideaSummary,
-      input: params.input,
+      input,
       output,
       status: "ready",
       provider: provider.resultProviderName ?? provider.name,

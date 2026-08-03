@@ -9,6 +9,18 @@ export interface ScriptReference {
   completionRate: number | null;
 }
 
+/** 仅保留属于该 owner 的导入视频，避免跨租户参考泄漏 */
+export function recordsOwnedBy(
+  records: ImportedVideoRecord[],
+  imports: Array<{ id: string; ownerId: string }>,
+  ownerId: string,
+): ImportedVideoRecord[] {
+  const ownedImportIds = new Set(
+    imports.filter((item) => item.ownerId === ownerId).map((item) => item.id),
+  );
+  return records.filter((record) => ownedImportIds.has(record.importId));
+}
+
 export function findScriptReferences(
   records: ImportedVideoRecord[],
   format: ScriptDraftFormat,
@@ -38,7 +50,10 @@ export function findScriptReferences(
       return { record, score };
     })
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.record.id.localeCompare(b.record.id);
+    })
     .slice(0, limit);
 
   return scored.map(({ record }) => ({

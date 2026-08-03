@@ -39,16 +39,19 @@ import {
 } from "@/lib/draft-review/versions";
 import { defaultTopicForFormat, topicRequired } from "@/lib/script-workbench/catalog";
 import {
-  preferScriptBody,
   resolveDraftListTitle,
   sanitizeGeneratedTitles,
   summarizeIdea,
 } from "@/lib/script-workbench/display";
-import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import {
+  finalizeScriptOutput,
+  sanitizeScriptInput,
+} from "@/lib/script-workbench/production-guide";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
 import {
   findScriptReferences,
   formatReferencesForPrompt,
+  recordsOwnedBy,
 } from "@/lib/script-workbench/references";
 import { deletePrivateFiles } from "@/lib/storage/storage";
 
@@ -200,13 +203,23 @@ async function writeChangedCollections(
 
 async function mutate<T>(operation: (state: AppState) => T | Promise<T>): Promise<T> {
   let result!: T;
-  mutationQueue = mutationQueue.then(async () => {
-    const state = await readState();
-    const before = structuredClone(state);
-    result = await operation(state);
-    await writeChangedCollections(before, state);
+  let failure: unknown;
+  const run = mutationQueue.then(async () => {
+    try {
+      const state = await readState();
+      const before = structuredClone(state);
+      result = await operation(state);
+      await writeChangedCollections(before, state);
+    } catch (error) {
+      failure = error;
+    }
   });
-  await mutationQueue;
+  mutationQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  await run;
+  if (failure) throw failure;
   return result;
 }
 
@@ -827,6 +840,18 @@ class SitesRepository extends CloudRepository {
         (item) => item.id === scriptId && item.ownerId === ownerId,
       );
       if (!draft) return null;
+      if (patch.input) {
+        patch = { ...patch, input: sanitizeScriptInput(patch.input) };
+      }
+      const nextStatus = patch.status ?? draft.status;
+      const nextOutput =
+        patch.output !== undefined ? patch.output : draft.output;
+      if (nextStatus === "ready" && nextOutput == null) {
+        throw Object.assign(
+          new Error("状态为可用时必须有完整输出内容"),
+          { status: 400 },
+        );
+      }
       Object.assign(draft, patch, {
         id: scriptId,
         ownerId,
@@ -865,32 +890,32 @@ class SitesRepository extends CloudRepository {
     if (topicRequired(params.format) && !topic) {
       throw Object.assign(new Error("该制作形态需要选择业务主题"), { status: 400 });
     }
+    const input = sanitizeScriptInput(params.input);
     const state = await readState();
     const refs = findScriptReferences(
-      state.records,
+      recordsOwnedBy(state.records, state.imports, ownerId),
       params.format,
       topic,
-      params.input.idea,
+      input.idea,
     );
     const provider = resolveScriptProvider();
-    let output = await provider.generate({
+    const request = {
       format: params.format,
       topic,
       subTopics: params.subTopics ?? [],
       processKinds: params.processKinds ?? [],
-      input: params.input,
+      input,
       referenceHints: formatReferencesForPrompt(refs),
-    });
-    output = preferScriptBody(output, params.input.existingScript);
-    output = {
-      ...output,
-      titles: sanitizeGeneratedTitles(output.titles, params.input.idea),
     };
-    output = { ...output, plainText: outputToPlainText(output) };
+    let output = await provider.generate(request);
+    output = finalizeScriptOutput(request, {
+      ...output,
+      titles: sanitizeGeneratedTitles(output.titles, input.idea),
+    });
 
     const ideaSummary = summarizeIdea({
-      idea: params.input.idea,
-      existingScript: params.input.existingScript,
+      idea: input.idea,
+      existingScript: input.existingScript,
     });
     const now = new Date().toISOString();
     const draft: ScriptDraft = {
@@ -898,13 +923,13 @@ class SitesRepository extends CloudRepository {
       ownerId,
       format: params.format,
       topic,
-      formatOther: params.input.formatOther?.trim() || null,
-      topicOther: params.input.topicOther?.trim() || null,
+      formatOther: input.formatOther?.trim() || null,
+      topicOther: input.topicOther?.trim() || null,
       subTopics: params.subTopics ?? [],
       processKinds: params.processKinds ?? [],
       title: null,
       ideaSummary,
-      input: params.input,
+      input,
       output,
       status: "ready",
       provider: provider.resultProviderName ?? provider.name,

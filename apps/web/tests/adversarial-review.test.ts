@@ -78,7 +78,7 @@ describe("adversarial boundaries", () => {
     ]);
   });
 
-  it("marks script output as mock when DashScope fails", async () => {
+  it("marks script output as mock-degraded when DashScope fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
     const provider = new DashScopeScriptProvider();
     const output = await provider.generate({
@@ -89,6 +89,9 @@ describe("adversarial boundaries", () => {
       input: { idea: "软水机怎么选" },
     });
     expect(output.pipeline).toBe("koubo");
-    expect(provider.resultProviderName).toBe("mock");
+    expect(provider.resultProviderName).toBe("mock-degraded");
+    expect(
+      output.gapsOrWarnings.some((item) => item.includes("降级")),
+    ).toBe(true);
   });
 });
