@@ -25,14 +25,23 @@ services:
       NEXT_PUBLIC_APP_MODE: REAL
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_diagnosis
       PRIVATE_STORAGE_ROOT: /app/.data/uploads
+      USER_SETTINGS_PATH: /app/.data/settings/user-settings.json
+      WORKER_URL: http://worker:8000
       SIGNED_URL_SECRET: ${SIGNED_URL_SECRET:-local-compose-secret-change-me}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_API_BASE_URL: ${DASHSCOPE_API_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      VISION_PROVIDER: ${VISION_PROVIDER:-dashscope}
+      LLM_PROVIDER: ${LLM_PROVIDER:-dashscope}
     ports:
       - "3000:3000"
     volumes:
       - private_uploads:/app/.data/uploads
+      - user_settings:/app/.data/settings
     depends_on:
       postgres:
         condition: service_healthy
+      worker:
+        condition: service_started
 
   worker:
     build:
@@ -42,6 +51,7 @@ services:
       APP_MODE: REAL
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_diagnosis
       PRIVATE_STORAGE_ROOT: /app/.data/uploads
+      USER_SETTINGS_PATH: /app/.data/settings/user-settings.json
       SPEECH_PROVIDER: ${SPEECH_PROVIDER:-mock}
       SPEECH_API_BASE_URL: ${SPEECH_API_BASE_URL:-}
       SPEECH_API_KEY: ${SPEECH_API_KEY:-}
@@ -55,6 +65,7 @@ services:
       - "8000:8000"
     volumes:
       - private_uploads:/app/.data/uploads
+      - user_settings:/app/.data/settings
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,3 +73,4 @@ services:
 volumes:
   postgres_data:
   private_uploads:
+  user_settings:

@@ -41,6 +41,28 @@
 
 Sites / D1 云端路径支持脚本草稿持久化；PostgreSQL（`APP_MODE=REAL`）当前**不**支持脚本工作台，请继续用 LOCAL 或 Sites 部署。
 
+### 仅上线脚本工作台（Zeabur / 单服务）
+
+如果你只想上线 `/scripts`，建议只部署 `apps/web`，不部署 `worker`、不接 PostgreSQL。
+
+关键是把仓储切到本地 JSON：
+
+- `REPOSITORY_BACKEND=local`
+- `APP_MODE=LOCAL`
+- `NEXT_PUBLIC_APP_MODE=LOCAL`
+- `DASHSCOPE_API_KEY=<你的key>`（可选，不填则走 mock）
+
+可选（自定义本地只读源路径，不配也可启动）：
+
+- `LOCAL_SOURCE_WORKBOOK=/app/outputs/xxx.xlsx`
+- `LOCAL_VIDEO_DIRECTORY=/app/videoes`
+
+说明：
+
+- `REPOSITORY_BACKEND=local` 会把 API 的读写切到 `.data/local-state.json`，适合单机轻量部署。
+- 脚本工作台本身不依赖 Worker；视频诊断/转写链路仍属于完整部署范畴。
+- `.data` 必须挂持久卷，否则容器重建会丢脚本草稿。
+
 ## 运行模式
 
 ### LOCAL（默认，真实本地数据）

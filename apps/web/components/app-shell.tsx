@@ -9,9 +9,11 @@ import {
   FileSpreadsheet,
   Film,
   ScrollText,
+  Settings,
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/components/ui";
+import { SetupBanner } from "@/features/settings/setup-banner";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -31,6 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/analysis", label: "数据分析", icon: BarChart3 },
   ];
   const homeHref = "/scripts";
+  const settingsActive = pathname.startsWith("/settings");
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-line/90 bg-[#f8faf8]/95 backdrop-blur">
@@ -87,10 +90,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <ShieldCheck size={15} className="text-pine" />
               文件默认私有
             </span>
+            <Link
+              href="/settings"
+              aria-label="设置"
+              title="设置"
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-lg border transition",
+                settingsActive
+                  ? "border-pine/30 bg-[#e9f0eb] text-pine"
+                  : "border-line bg-white text-[#66736c] hover:bg-fog",
+              )}
+            >
+              <Settings size={16} />
+            </Link>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-[1560px] px-4 py-7 md:px-8 md:py-9">{children}</main>
+      <main className="mx-auto max-w-[1560px] px-4 py-7 md:px-8 md:py-9">
+        <SetupBanner />
+        {children}
+      </main>
     </div>
   );
 }

@@ -17,31 +17,27 @@ import {
 } from "@/lib/script-workbench/production-guide";
 import type { ScriptProvider } from "@/lib/script-workbench/provider";
 
-function env(name: string, fallback = ""): string {
-  return (process.env[name] ?? fallback).trim();
-}
+import {
+  hasResolvedDashScopeCredentials,
+  resolveDashScopeBaseUrl,
+  resolveDashScopeKey,
+  resolveLlmModel,
+} from "@/lib/settings/credentials";
 
 export function hasDashScopeCredentials(): boolean {
-  return Boolean(
-    env("DASHSCOPE_API_KEY") || env("VISION_API_KEY") || env("LLM_API_KEY"),
-  );
+  return hasResolvedDashScopeCredentials();
 }
 
 function dashscopeKey(): string {
-  return env("DASHSCOPE_API_KEY") || env("VISION_API_KEY") || env("LLM_API_KEY");
+  return resolveDashScopeKey();
 }
 
 function dashscopeBaseUrl(): string {
-  return (
-    env("LLM_API_BASE_URL") ||
-    env("VISION_API_BASE_URL") ||
-    env("DASHSCOPE_API_BASE_URL") ||
-    "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  ).replace(/\/$/u, "");
+  return resolveDashScopeBaseUrl();
 }
 
 function llmModel(): string {
-  return env("LLM_MODEL") || env("VISION_MODEL") || "qwen3.7-plus";
+  return resolveLlmModel();
 }
 
 function schemaHint(koubo: boolean): string {

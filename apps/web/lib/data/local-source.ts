@@ -10,13 +10,14 @@ import type {
 } from "@video-diagnosis/shared-types";
 import { parseWorkbook } from "@/lib/imports/parser";
 import { normalizeTitle } from "@/lib/imports/normalize";
-import type { AppState, ImportEntry } from "@/lib/data/types";
+import { emptyState, type AppState, type ImportEntry } from "@/lib/data/types";
 
 export const LOCAL_SOURCE_IMPORT_ID = "local-source";
 const DEFAULT_SOURCE_WORKBOOK =
   "outputs/019fab89-e492-7a70-88d3-a82ff1206eed/视频号动态数据明细_已匹配视频名称.xlsx";
 const DEFAULT_VIDEO_DIRECTORY = "videoes";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
+const UNAVAILABLE_FINGERPRINT = "local-source-unavailable";
 
 interface LocalSourcePaths {
   workspaceRoot: string;
@@ -73,6 +74,18 @@ export function localSourcePaths(): LocalSourcePaths {
   };
 }
 
+/** 交付包可能不含样例工作簿/视频目录；缺失时脚本工作台仍可用。 */
+export async function isLocalSourceAvailable(): Promise<boolean> {
+  const paths = localSourcePaths();
+  try {
+    await fs.access(paths.workbookPath);
+    const stat = await fs.stat(paths.videoDirectory);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function fingerprintInventory(inventory: LocalSourceInventory): string {
   return createHash("sha256")
     .update(
@@ -112,6 +125,7 @@ async function readLocalSourceInventory(): Promise<LocalSourceInventory> {
 }
 
 export async function readLocalSourceFingerprint(): Promise<string> {
+  if (!(await isLocalSourceAvailable())) return UNAVAILABLE_FINGERPRINT;
   return fingerprintInventory(await readLocalSourceInventory());
 }
 
@@ -153,8 +167,19 @@ function matchedFilenames(buffer: Uint8Array): Map<number, string> {
 }
 
 export async function buildLocalSourceState(): Promise<LocalSourceSnapshot> {
+  const paths = localSourcePaths();
+  if (!(await isLocalSourceAvailable())) {
+    return {
+      state: emptyState(),
+      fingerprint: UNAVAILABLE_FINGERPRINT,
+      paths,
+      matchedRelationshipCount: 0,
+      unmatchedAssetCount: 0,
+    };
+  }
+
   const inventory = await readLocalSourceInventory();
-  const { paths, workbookStat, filenames, fileStats } = inventory;
+  const { workbookStat, filenames, fileStats } = inventory;
   const workbookBuffer = await fs.readFile(paths.workbookPath);
   const fingerprint = fingerprintInventory(inventory);
 

@@ -14,29 +14,27 @@ import {
 } from "@/lib/draft-review/similar-videos";
 import { readPrivateFileAsDataUrl } from "@/lib/storage/storage";
 
-function env(name: string, fallback = ""): string {
-  return (process.env[name] ?? fallback).trim();
+import {
+  hasResolvedDashScopeCredentials,
+  resolveDashScopeBaseUrl,
+  resolveDashScopeKey,
+  resolveVisionModel,
+} from "@/lib/settings/credentials";
+
+export function hasDashScopeCredentials(): boolean {
+  return hasResolvedDashScopeCredentials();
 }
 
 function dashscopeKey(): string {
-  return (
-    env("DASHSCOPE_API_KEY") ||
-    env("VISION_API_KEY") ||
-    env("LLM_API_KEY")
-  );
+  return resolveDashScopeKey();
 }
 
 function dashscopeBaseUrl(): string {
-  return (
-    env("VISION_API_BASE_URL") ||
-    env("LLM_API_BASE_URL") ||
-    env("DASHSCOPE_API_BASE_URL") ||
-    "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  ).replace(/\/$/u, "");
+  return resolveDashScopeBaseUrl();
 }
 
 function visionModel(): string {
-  return env("VISION_MODEL") || env("LLM_MODEL") || "qwen3.7-plus";
+  return resolveVisionModel();
 }
 
 function mimeForImage(filePath: string): string {
@@ -302,6 +300,3 @@ export class DashScopeDraftReviewProvider implements DraftReviewProvider {
   }
 }
 
-export function hasDashScopeCredentials(): boolean {
-  return Boolean(dashscopeKey());
-}

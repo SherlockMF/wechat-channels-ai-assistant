@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel
 
-from app.config import settings
+from app.config import get_settings
 
 
 class TranscriptSegment(BaseModel):
@@ -47,9 +47,11 @@ class OpenAICompatibleSpeechProvider(SpeechToTextProvider):
     name = "openai-compatible"
 
     def __init__(self) -> None:
+        settings = get_settings()
         self.model = settings.speech_model
 
     async def transcribe(self, audio_path: Path) -> Transcript:
+        settings = get_settings()
         if not settings.speech_api_key or not settings.speech_api_base_url:
             raise RuntimeError("SPEECH_API_KEY 或 SPEECH_API_BASE_URL 未配置")
         async with httpx.AsyncClient(timeout=180) as client:
@@ -82,6 +84,7 @@ class OpenAICompatibleSpeechProvider(SpeechToTextProvider):
 
 
 def speech_provider() -> SpeechToTextProvider:
+    settings = get_settings()
     if settings.speech_provider == "mock":
         return MockSpeechProvider()
     return OpenAICompatibleSpeechProvider()

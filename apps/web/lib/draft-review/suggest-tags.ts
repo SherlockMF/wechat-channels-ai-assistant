@@ -7,30 +7,23 @@ const tagsResponseSchema = z.object({
   tags: z.array(z.string()).min(1).max(8),
 });
 
-function env(name: string, fallback = ""): string {
-  return (process.env[name] ?? fallback).trim();
-}
+import {
+  resolveDashScopeBaseUrl,
+  resolveDashScopeKey,
+  resolveLlmModel,
+} from "@/lib/settings/credentials";
 
 function dashscopeKey(): string {
   ensureRepoEnvLoaded();
-  return (
-    env("DASHSCOPE_API_KEY") ||
-    env("VISION_API_KEY") ||
-    env("LLM_API_KEY")
-  );
+  return resolveDashScopeKey();
 }
 
 function dashscopeBaseUrl(): string {
-  return (
-    env("VISION_API_BASE_URL") ||
-    env("LLM_API_BASE_URL") ||
-    env("DASHSCOPE_API_BASE_URL") ||
-    "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  ).replace(/\/$/u, "");
+  return resolveDashScopeBaseUrl();
 }
 
 function llmModel(): string {
-  return env("LLM_MODEL") || env("VISION_MODEL") || "qwen3.7-plus";
+  return resolveLlmModel();
 }
 
 /** 无大模型时的轻量启发式：从标题切出可用短标签。 */

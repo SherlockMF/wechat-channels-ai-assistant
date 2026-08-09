@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>没有 Homebrew 怎么装 FFmpeg</title>
+  <style>
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; background:#f2f2f7; color:#1c1c1e; line-height:1.65; }
+    .wrap { max-width:780px; margin:0 auto; padding:28px 18px 80px; }
+    h1 { font-size:28px; margin:0 0 12px; }
+    .card { background:#fff; border-radius:16px; padding:18px 20px; margin:0 0 14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+    .ok { background:#eaf9ef; border:1px solid #a8e6b8; }
+    .warn { background:#fff8e1; border:1px solid #ffd666; }
+    .big { font-weight:800; color:#000; }
+    .num { display:inline-flex; width:32px; height:32px; border-radius:50%; background:#007aff; color:#fff; font-weight:800; align-items:center; justify-content:center; margin-right:8px; }
+    h2 { font-size:20px; margin:0 0 10px; display:flex; align-items:center; }
+    ol,ul { margin:8px 0; padding-left:1.3em; }
+    li { margin:8px 0; font-size:17px; color:#3a3a3c; }
+    .block { background:#1c1c1e; color:#d7ffd7; padding:14px; border-radius:12px; font-family:ui-monospace,Menlo,monospace; white-space:pre-wrap; margin:12px 0; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>没有 Homebrew 怎么装 FFmpeg（Mac）</h1>
+    <div class="card warn">
+      <p><span class="big">推荐用「方法一」</span>：不用装 Homebrew，直接下载两个文件。<br />
+      Homebrew 在国内经常因网络失败，可以不装。</p>
+    </div>
+
+    <div class="card ok">
+      <h2><span class="num">1</span>方法一：直接下载（推荐，不用 Homebrew）</h2>
+      <ol>
+        <li>用 Safari 打开：<span class="big">https://evermeet.cx/ffmpeg/</span></li>
+        <li>下载 <span class="big">ffmpeg</span>（页面上的下载链接 / ZIP）</li>
+        <li>同一页再下载 <span class="big">ffprobe</span></li>
+        <li>在「下载」文件夹里解压，得到两个没有后缀的文件：
+          <ul>
+            <li><span class="big">ffmpeg</span></li>
+            <li><span class="big">ffprobe</span></li>
+          </ul>
+        </li>
+        <li>打开终端（Command + 空格 → 输入「终端」）</li>
+        <li>把下面整段复制粘贴到终端，回车：</li>
+      </ol>
+      <div class="block">sudo mkdir -p /usr/local/bin
+sudo mv ~/Downloads/ffmpeg /usr/local/bin/ffmpeg
+sudo mv ~/Downloads/ffprobe /usr/local/bin/ffprobe
+sudo chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+ffmpeg -version
+ffprobe -version</div>
+      <ol start="7">
+        <li>出现 <span class="big">Password:</span> 时，输入 Mac <span class="big">登录密码</span>（屏幕不会显示），输完回车</li>
+        <li>若提示找不到 Downloads 里的文件：用访达打开「下载」，确认解压后的文件名就是 ffmpeg / ffprobe，再改路径或把文件拖到终端替换命令里的路径</li>
+        <li>最后两行能刷出版本信息 = 成功</li>
+        <li><span class="big">重新启动本软件</span>，设置里点「重新检测」，FFmpeg / FFprobe 应变绿</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>方法二：先装 Homebrew，再装 FFmpeg</h2>
+      <p>仅在网络较好时尝试（连 GitHub 容易失败）。</p>
+      <ol>
+        <li>打开终端，粘贴下面整行后回车：</li>
+      </ol>
+      <div class="block">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</div>
+      <ol start="2">
+        <li>按提示按回车；遇到 Password 输入登录密码（不显示），回车</li>
+        <li>若多次 Failed / git fetch 失败：放弃方法二，改用上面的方法一</li>
+        <li>安装成功后（Apple 芯片 Mac）再执行：</li>
+      </ol>
+      <div class="block">echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+brew install ffmpeg</div>
+      <ol start="5">
+        <li>新开终端检查：</li>
+      </ol>
+      <div class="block">ffmpeg -version
+ffprobe -version</div>
+    </div>
+
+    <div class="card ok">
+      <h2>装好后怎么确认软件里也绿了</h2>
+      <ol>
+        <li>关掉正在跑的启动窗口</li>
+        <li>重新用 bash 拖文件启动（或双击桌面「视频号助手」）</li>
+        <li>打开设置 → 重新检测</li>
+        <li>FFmpeg、FFprobe 都显示「就绪」即可</li>
+      </ol>
+      <p>两个都会一起好，一般不用分别装。</p>
+    </div>
+  </div>
+</body>
+</html>
