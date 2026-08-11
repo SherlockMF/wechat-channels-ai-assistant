@@ -56,6 +56,10 @@ describe("运营报告可读性", () => {
     expect(markdown).toContain(result.hookAlternatives[0]!.visual);
     expect(markdown).toContain(result.audioSuggestions.openingAudioAction);
     expect(markdown).toContain(result.audioSuggestions.avoid[0]!);
+    expect(markdown).toContain("## 逐时码证据与修改意见");
+    expect(markdown).toContain("## 脚本与成片对齐");
+    expect(markdown).toContain("## 发布前检查单");
+    expect(markdown).toContain(result.detailedObservations?.[0]?.replacementExample ?? "");
     expect(markdown).not.toContain("average_watch_seconds");
     expect(markdown).not.toContain("置信度：medium");
   });

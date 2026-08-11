@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     speech_provider: str = "mock"
     speech_api_base_url: str = ""
     speech_api_key: str = ""
-    speech_model: str = "whisper-1"
+    speech_model: str = "qwen-audio-3.0-asr-flash"
 
     vision_provider: str = "mock"
     vision_api_base_url: str = ""

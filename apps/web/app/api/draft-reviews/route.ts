@@ -9,6 +9,27 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const ownerId = requestOwnerId(request);
   const items = await repository.listDraftReviews(ownerId);
+  if (process.env.SITES_DEPLOYMENT !== "true") {
+    const { enqueueDraftReviewAnalysis } = await import(
+      "@/lib/draft-review/queue-runtime"
+    );
+    await Promise.all(
+      items
+        .filter(
+          (item) =>
+            (item.status === "uploaded" || item.status === "processing") &&
+            item.currentVersionId,
+        )
+        .map((item) =>
+          enqueueDraftReviewAnalysis({
+            ownerId,
+            draftReviewId: item.id,
+            versionId: item.currentVersionId!,
+            sourceScriptDraftId: item.sourceScriptDraftId ?? null,
+          }),
+        ),
+    );
+  }
   const expires = Date.now() + 15 * 60_000;
   return NextResponse.json({
     items: items.map((item) => ({
@@ -40,12 +61,43 @@ export async function POST(request: Request) {
       null;
     const goal = String(formData.get("goal") ?? "").trim() || null;
     const tags = normalizeDraftTags(String(formData.get("tags") ?? ""));
+    const sourceScriptDraftId =
+      String(formData.get("sourceScriptDraftId") ?? "").trim() || null;
+    if (sourceScriptDraftId && sourceScriptDraftId.length > 200) {
+      return NextResponse.json({ error: "来源脚本 ID 无效" }, { status: 400 });
+    }
+    if (
+      sourceScriptDraftId &&
+      !(await repository.getScriptDraft(ownerId, sourceScriptDraftId))
+    ) {
+      return NextResponse.json({ error: "关联脚本不存在" }, { status: 404 });
+    }
     const coverValue = formData.get("cover");
     const coverFile = coverValue instanceof File && coverValue.size > 0 ? coverValue : null;
-    const draft = await saveDraftReviewVideo(ownerId, file, title, goal, coverFile, tags);
+    const draft = await saveDraftReviewVideo(
+      ownerId,
+      file,
+      title,
+      goal,
+      coverFile,
+      tags,
+      sourceScriptDraftId,
+    );
     const created = await repository.createDraftReview(ownerId, draft);
-    const processed = await repository.processDraftReview(ownerId, created.id);
-    return NextResponse.json({ draft: processed ?? created }, { status: 201 });
+    if (process.env.SITES_DEPLOYMENT === "true") {
+      const processed = await repository.processDraftReview(ownerId, created.id);
+      return NextResponse.json({ draft: processed ?? created }, { status: 201 });
+    }
+    const { enqueueDraftReviewAnalysis } = await import(
+      "@/lib/draft-review/queue-runtime"
+    );
+    await enqueueDraftReviewAnalysis({
+      ownerId,
+      draftReviewId: created.id,
+      versionId: created.currentVersionId!,
+      sourceScriptDraftId: created.sourceScriptDraftId ?? null,
+    });
+    return NextResponse.json({ draft: created }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "审片创建失败" },

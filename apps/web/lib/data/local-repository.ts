@@ -61,6 +61,10 @@ import {
   localSourcePaths,
   readLocalSourceFingerprint,
 } from "@/lib/data/local-source";
+import {
+  isViralResearchSnapshotExpired,
+  readViralResearchSnapshot,
+} from "@/lib/viral-research/cache";
 
 const dataRoot = path.join(localSourcePaths().workspaceRoot, ".data");
 const databasePath = path.join(dataRoot, "local-state.json");
@@ -187,10 +191,34 @@ function normalizeScriptDraft(draft: ScriptDraft): ScriptDraft {
     ...draft,
     formatOther: draft.formatOther ?? null,
     topicOther: draft.topicOther ?? null,
+    editedPlainText: draft.editedPlainText ?? null,
+    parentScriptDraftId: draft.parentScriptDraftId ?? null,
+    promptVersion: draft.promptVersion ?? null,
+  };
+}
+
+function freezeScriptSnapshot(draft: ScriptDraft) {
+  return {
+    scriptDraftId: draft.id,
+    scriptUpdatedAt: draft.updatedAt,
+    title: draft.title,
+    script:
+      draft.editedPlainText?.trim() ||
+      draft.output?.script?.trim() ||
+      draft.output?.plainText?.trim() ||
+      draft.input.existingScript?.trim() ||
+      "",
+    subtitleBeats: draft.output?.subtitleBeats ?? [],
+    researchSnapshotId: draft.input.researchSnapshotId ?? null,
   };
 }
 
 export class LocalRepository {
+  async listOwnerVideoRecords(ownerId: string): Promise<ImportedVideoRecord[]> {
+    const state = await readState();
+    return recordsOwnedBy(state.records, state.imports, ownerId);
+  }
+
   async createImport(
     ownerId: string,
     filename: string,
@@ -648,9 +676,10 @@ export class LocalRepository {
           (item) => item.draftReviewVersionId === viewing.id,
         ) ?? null)
       : null;
+    const ownerRecords = recordsOwnedBy(state.records, state.imports, ownerId);
     const baselineRecords = draft.baselineImportId
-      ? state.records.filter((item) => item.importId === draft.baselineImportId)
-      : state.records;
+      ? ownerRecords.filter((item) => item.importId === draft.baselineImportId)
+      : ownerRecords;
     return {
       draft: viewDraft,
       result,
@@ -689,6 +718,19 @@ export class LocalRepository {
       draft.currentVersionId = versionId;
       draft.versionCount = draft.versionCount || 1;
       const version = versionFromDraftFields(draft, versionId, 1);
+      if (draft.sourceScriptDraftId) {
+        const script = (state.scriptDrafts ?? []).find(
+          (item) =>
+            item.id === draft.sourceScriptDraftId && item.ownerId === ownerId,
+        );
+        if (!script) {
+          throw Object.assign(new Error("关联脚本不存在"), { status: 404 });
+        }
+        version.scriptSnapshot = freezeScriptSnapshot(normalizeScriptDraft(script));
+      } else {
+        draft.sourceScriptDraftId = null;
+        version.scriptSnapshot = null;
+      }
       state.draftReviewVersions.push(version);
       state.draftReviews.push(draft);
       return draft;
@@ -717,6 +759,17 @@ export class LocalRepository {
       if (meta?.title !== undefined) draft.title = meta.title;
       if (meta?.goal !== undefined) draft.goal = meta.goal;
       if (meta?.tags !== undefined) draft.tags = meta.tags;
+      if (version.scriptSnapshot === undefined) {
+        const script = draft.sourceScriptDraftId
+          ? (state.scriptDrafts ?? []).find(
+              (item) =>
+                item.id === draft.sourceScriptDraftId && item.ownerId === ownerId,
+            )
+          : null;
+        version.scriptSnapshot = script
+          ? freezeScriptSnapshot(normalizeScriptDraft(script))
+          : null;
+      }
       state.draftReviewVersions.push(version);
       applyVersionToDraft(draft, version, versions.length + 1);
       return draft;
@@ -1001,18 +1054,28 @@ export class LocalRepository {
         title: draft.title,
         goal: draft.goal,
         tags: draft.tags ?? [],
+      }, {
+        onProgress: async (currentStep, progress) => {
+          await this.updateDraftReviewVersion(
+            ownerId,
+            draftReviewId,
+            targetVersionId,
+            { currentStep, progress },
+          );
+        },
       });
       await this.updateDraftReviewVersion(ownerId, draftReviewId, targetVersionId, {
-        progress: 55,
+        progress: 82,
         currentStep: "analyzing",
         evidencePath: evidenceDirectory,
         durationSeconds: evidence.durationSeconds,
       });
 
       const state = await readState();
+      const ownerRecords = recordsOwnedBy(state.records, state.imports, ownerId);
       const baselineRecords = draft.baselineImportId
-        ? state.records.filter((item) => item.importId === draft.baselineImportId)
-        : state.records;
+        ? ownerRecords.filter((item) => item.importId === draft.baselineImportId)
+        : ownerRecords;
       const baseline =
         baselineRecords.length > 0
           ? calculateAccountBaseline(baselineRecords)
@@ -1021,11 +1084,25 @@ export class LocalRepository {
         tags: draft.tags ?? [],
         title: draft.title,
       });
+      const currentVersion = state.draftReviewVersions.find(
+        (item) => item.id === targetVersionId,
+      );
+      const researchSnapshotId = currentVersion?.scriptSnapshot?.researchSnapshotId;
+      const storedResearchSnapshot = researchSnapshotId
+        ? await readViralResearchSnapshot(ownerId, researchSnapshotId)
+        : null;
+      const researchSnapshot =
+        storedResearchSnapshot &&
+        !isViralResearchSnapshotExpired(storedResearchSnapshot)
+          ? storedResearchSnapshot
+          : null;
       const provider = resolveDraftReviewProvider();
       const diagnosis = await provider.analyze({
         evidence,
         baseline,
         similarVideos,
+        scriptSnapshot: currentVersion?.scriptSnapshot ?? null,
+        researchSnapshot,
       });
 
       const previousVersion = state.draftReviewVersions
@@ -1317,6 +1394,7 @@ export class LocalRepository {
       processKinds?: ScriptDraftProcessKind[];
       input: ScriptDraftInput;
       title?: string | null;
+      parentScriptDraftId?: string | null;
     },
   ): Promise<ScriptDraft> {
     let topic =
@@ -1337,6 +1415,15 @@ export class LocalRepository {
       input.idea,
     );
     const provider = resolveScriptProvider();
+    const storedResearchSnapshot = input.researchSnapshotId
+      ? await readViralResearchSnapshot(ownerId, input.researchSnapshotId)
+      : null;
+    const researchSnapshot =
+      storedResearchSnapshot &&
+      !isViralResearchSnapshotExpired(storedResearchSnapshot)
+        ? storedResearchSnapshot
+        : null;
+    const selectedIds = new Set(input.selectedResearchItemIds ?? []);
     const request = {
       format: params.format,
       topic,
@@ -1344,6 +1431,13 @@ export class LocalRepository {
       processKinds: params.processKinds ?? [],
       input,
       referenceHints: formatReferencesForPrompt(refs),
+      researchSnapshot,
+      selectedResearchItems:
+        researchSnapshot?.items.filter((item) => selectedIds.has(item.id)) ?? [],
+      selectedTopicCard:
+        researchSnapshot?.topicCards.find(
+          (item) => item.id === input.selectedTopicCardId,
+        ) ?? null,
     };
     let output = await provider.generate(request);
     output = finalizeScriptOutput(request, {
@@ -1372,6 +1466,9 @@ export class LocalRepository {
       status: "ready",
       provider: provider.resultProviderName ?? provider.name,
       referenceVideoIds: refs.map((item) => item.videoRecordId),
+      editedPlainText: null,
+      parentScriptDraftId: params.parentScriptDraftId ?? null,
+      promptVersion: "viral-v2",
       createdAt: now,
       updatedAt: now,
     };
@@ -1395,8 +1492,15 @@ export class LocalRepository {
       topic: existing.topic,
       subTopics: existing.subTopics,
       processKinds: existing.processKinds,
-      input: existing.input,
+      input: {
+        ...existing.input,
+        existingScript:
+          existing.editedPlainText?.trim() ||
+          existing.output?.script?.trim() ||
+          existing.input.existingScript,
+      },
       title: existing.title,
+      parentScriptDraftId: existing.id,
     });
   }
 }

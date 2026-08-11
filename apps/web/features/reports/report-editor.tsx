@@ -249,7 +249,7 @@ export function ReportEditor({
             <li>· 引用原片是否注明素材位置</li>
             <li>· 无素材时是否标记需要补拍</li>
             <li>· 是否避免虚构逐秒留存</li>
-            <li>· CTA 是否只有一个明确动作</li>
+            <li>· 行动号召是否只有一个明确动作</li>
           </ul>
         </Card>
         <Card className="p-5">

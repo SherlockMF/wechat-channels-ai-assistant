@@ -1,5 +1,9 @@
 import { diagnosisResultSchema } from "@video-diagnosis/shared-types";
-import type { DiagnosisResult } from "@video-diagnosis/shared-types";
+import type {
+  DiagnosisResult,
+  DraftReviewScriptSnapshot,
+  ViralResearchSnapshot,
+} from "@video-diagnosis/shared-types";
 import type { AccountBaseline } from "@/lib/metrics/account";
 import type { DraftEvidenceManifest } from "@/lib/draft-review/evidence";
 import type { SimilarVideoSummary } from "@/lib/draft-review/similar-videos";
@@ -14,6 +18,10 @@ export interface DraftReviewProviderInput {
   evidence: DraftEvidenceManifest;
   baseline: AccountBaseline | null;
   similarVideos?: SimilarVideoSummary[];
+  /** 创建视频版本时冻结的脚本，不能用随后编辑的脚本替换。 */
+  scriptSnapshot?: DraftReviewScriptSnapshot | null;
+  /** 可追溯的联网研究结果；缺失时 Provider 必须明确降级，不能假装实时搜索。 */
+  researchSnapshot?: ViralResearchSnapshot | null;
 }
 
 export interface DraftReviewProvider {
@@ -31,6 +39,8 @@ export class MockDraftReviewProvider implements DraftReviewProvider {
       input.evidence,
       input.baseline,
       input.similarVideos ?? [],
+      input.scriptSnapshot ?? null,
+      input.researchSnapshot ?? null,
     );
   }
 }

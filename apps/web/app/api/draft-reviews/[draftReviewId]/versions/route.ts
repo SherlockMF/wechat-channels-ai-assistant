@@ -43,18 +43,36 @@ export async function POST(request: Request, context: Context) {
       file,
       coverFile,
     });
-    await repository.addDraftReviewVersion(ownerId, draftReviewId, version, {
+    const updated = await repository.addDraftReviewVersion(ownerId, draftReviewId, version, {
       title,
       goal,
       tags,
     });
-    const processed = await repository.processDraftReview(
+    if (!updated) {
+      return NextResponse.json({ error: "审片记录不存在" }, { status: 404 });
+    }
+    if (process.env.SITES_DEPLOYMENT === "true") {
+      const processed = await repository.processDraftReview(
+        ownerId,
+        draftReviewId,
+        version.id,
+      );
+      return NextResponse.json(
+        { draft: processed ?? updated, versionId: version.id },
+        { status: 201 },
+      );
+    }
+    const { enqueueDraftReviewAnalysis } = await import(
+      "@/lib/draft-review/queue-runtime"
+    );
+    await enqueueDraftReviewAnalysis({
       ownerId,
       draftReviewId,
-      version.id,
-    );
+      versionId: version.id,
+      sourceScriptDraftId: updated.sourceScriptDraftId ?? null,
+    });
     return NextResponse.json(
-      { draft: processed, versionId: version.id },
+      { draft: updated, versionId: version.id },
       { status: 201 },
     );
   } catch (error) {

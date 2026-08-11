@@ -7,16 +7,12 @@ const tagsResponseSchema = z.object({
   tags: z.array(z.string()).min(1).max(8),
 });
 
+import { callDashScopeChatCompletions } from "@/lib/dashscope/chat-completions";
 import {
+  hasResolvedDashScopeCredentials,
   resolveDashScopeBaseUrl,
-  resolveDashScopeKey,
   resolveLlmModel,
 } from "@/lib/settings/credentials";
-
-function dashscopeKey(): string {
-  ensureRepoEnvLoaded();
-  return resolveDashScopeKey();
-}
 
 function dashscopeBaseUrl(): string {
   return resolveDashScopeBaseUrl();
@@ -59,9 +55,6 @@ export function heuristicTagsFromTitle(title: string): string[] {
 }
 
 async function callLlmForTags(title: string): Promise<string[]> {
-  const key = dashscopeKey();
-  if (!key) throw new Error("未配置大模型密钥");
-
   const prompt = [
     "你是视频号内容标签助手。根据视频标题归纳 3～5 个短标签。",
     "要求：",
@@ -71,33 +64,18 @@ async function callLlmForTags(title: string): Promise<string[]> {
     `视频标题：${title}`,
   ].join("\n");
 
-  const response = await fetch(`${dashscopeBaseUrl()}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: llmModel(),
+  const result = await callDashScopeChatCompletions({
+    role: "llm",
+    baseUrl: dashscopeBaseUrl(),
+    primaryModel: llmModel(),
+    buildBody: (model) => ({
+      model,
       temperature: 0.2,
       messages: [{ role: "user", content: prompt }],
     }),
   });
 
-  const body = (await response.json()) as {
-    error?: { message?: string };
-    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-  };
-  if (!response.ok) {
-    throw new Error(body.error?.message ?? `标签归纳失败（HTTP ${response.status}）`);
-  }
-  const message = body.choices?.[0]?.message?.content;
-  const text =
-    typeof message === "string"
-      ? message
-      : Array.isArray(message)
-        ? message.map((part) => part.text ?? "").join("\n")
-        : "";
+  const text = result.content;
   if (!text.trim()) throw new Error("模型未返回标签");
 
   const parsed = tagsResponseSchema.parse(extractJsonObject(text));
@@ -113,7 +91,8 @@ export async function suggestTagsFromTitle(title: string): Promise<{
     return { tags: [], source: "heuristic" };
   }
 
-  if (dashscopeKey()) {
+  if (hasResolvedDashScopeCredentials()) {
+    ensureRepoEnvLoaded();
     try {
       const tags = await callLlmForTags(normalizedTitle);
       if (tags.length > 0) return { tags, source: "llm" };

@@ -13,6 +13,11 @@ import { Badge, Button, Card, PageHeader, cn } from "@/components/ui";
 import type { HealthCheck } from "@/lib/settings/types";
 import { defaultUserSettings } from "@/lib/settings/schema";
 import type { UserSettings } from "@/lib/settings/schema";
+import {
+  NATIVE_DASHSCOPE_RESEARCH_BASE_URL,
+  describeWebResearchConfig,
+  normalizeWebResearchBlock,
+} from "@/lib/settings/web-research-config";
 
 type TabId = "health" | "api" | "guide";
 
@@ -100,31 +105,38 @@ export function SettingsPage() {
     }
   };
 
-  const applyDashscopeToAll = () => {
+  const applyDashscopeToAll = (base: UserSettings): UserSettings => {
     const key = dashscopeDraft.trim();
-    setSettings((prev) => ({
-      ...prev,
+    const resolvedKey = key.includes("*")
+      ? base.providers.dashscopeApiKey
+      : key;
+    return {
+      ...base,
       providers: {
-        ...prev.providers,
-        dashscopeApiKey: key,
+        ...base.providers,
+        dashscopeApiKey: resolvedKey,
         vision: {
-          ...prev.providers.vision,
-          provider: prev.providers.vision.provider || "dashscope",
-          apiKey: key.includes("*") ? prev.providers.vision.apiKey : key,
+          ...base.providers.vision,
+          provider: base.providers.vision.provider || "dashscope",
+          apiKey: key.includes("*") ? base.providers.vision.apiKey : key,
         },
         llm: {
-          ...prev.providers.llm,
-          provider: prev.providers.llm.provider || "dashscope",
-          apiKey: key.includes("*") ? prev.providers.llm.apiKey : key,
+          ...base.providers.llm,
+          provider: base.providers.llm.provider || "dashscope",
+          apiKey: key.includes("*") ? base.providers.llm.apiKey : key,
         },
+        webResearch: normalizeWebResearchBlock({
+          ...base.providers.webResearch,
+          apiKey: key.includes("*") ? base.providers.webResearch.apiKey : key,
+        }),
         speech: {
-          ...prev.providers.speech,
+          ...base.providers.speech,
           apiKey: key.includes("*")
-            ? prev.providers.speech.apiKey
-            : key || prev.providers.speech.apiKey,
+            ? base.providers.speech.apiKey
+            : key || base.providers.speech.apiKey,
         },
       },
-    }));
+    };
   };
 
   const guideItems = useMemo(
@@ -207,7 +219,9 @@ export function SettingsPage() {
                 dashscopeDraft={dashscopeDraft}
                 onDashscopeDraft={setDashscopeDraft}
                 onChange={setSettings}
-                onApplyDashscope={applyDashscopeToAll}
+                onApplyDashscope={() => {
+                  setSettings((prev) => applyDashscopeToAll(prev));
+                }}
               />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="secondary" onClick={() => setWizardStep(0)}>
@@ -217,14 +231,9 @@ export function SettingsPage() {
                   type="button"
                   disabled={saving}
                   onClick={async () => {
-                    applyDashscopeToAll();
-                    await saveSettings({
-                      ...settings,
-                      providers: {
-                        ...settings.providers,
-                        dashscopeApiKey: dashscopeDraft.trim() || settings.providers.dashscopeApiKey,
-                      },
-                    });
+                    const next = applyDashscopeToAll(settings);
+                    setSettings(next);
+                    await saveSettings(next);
                     setWizardStep(2);
                   }}
                 >
@@ -317,21 +326,17 @@ export function SettingsPage() {
               dashscopeDraft={dashscopeDraft}
               onDashscopeDraft={setDashscopeDraft}
               onChange={setSettings}
-              onApplyDashscope={applyDashscopeToAll}
+              onApplyDashscope={() => {
+                setSettings((prev) => applyDashscopeToAll(prev));
+              }}
             />
             <Button
               type="button"
               disabled={saving}
               onClick={() => {
-                applyDashscopeToAll();
-                void saveSettings({
-                  ...settings,
-                  providers: {
-                    ...settings.providers,
-                    dashscopeApiKey:
-                      dashscopeDraft.trim() || settings.providers.dashscopeApiKey,
-                  },
-                });
+                const next = applyDashscopeToAll(settings);
+                setSettings(next);
+                void saveSettings(next);
               }}
             >
               <Save size={14} />
@@ -443,6 +448,17 @@ function ApiForm({
   onChange: (next: UserSettings) => void;
   onApplyDashscope: () => void;
 }) {
+  const updateWebResearch = (
+    patch: Partial<UserSettings["providers"]["webResearch"]>,
+  ) =>
+    onChange({
+      ...settings,
+      providers: {
+        ...settings.providers,
+        webResearch: { ...settings.providers.webResearch, ...patch },
+      },
+    });
+
   return (
     <div className="space-y-4">
       <label className="block space-y-1.5">
@@ -458,7 +474,7 @@ function ApiForm({
         />
       </label>
       <Button type="button" variant="secondary" size="sm" onClick={onApplyDashscope}>
-        同步到视觉 / LLM / 语音字段
+        同步到视觉 / LLM / 语音 / 联网研究字段
       </Button>
       <label className="block space-y-1.5">
         <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
@@ -481,37 +497,184 @@ function ApiForm({
       <div className="grid gap-4 md:grid-cols-3">
         {(
           [
-            ["speech", "语音 Speech"],
-            ["vision", "视觉 Vision"],
-            ["llm", "语言模型 LLM"],
+            ["speech", "语音 Speech", "qwen-audio-3.0-asr-flash"],
+            ["vision", "视觉 Vision", "qwen-vl-plus"],
+            ["llm", "语言模型 LLM", "qwen-plus"],
           ] as const
-        ).map(([key, label]) => (
-          <label key={key} className="block space-y-1.5">
+        ).map(([key, label, modelPlaceholder]) => (
+          <div key={key} className="space-y-3">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+                {label} Key
+              </span>
+              <input
+                className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+                value={settings.providers[key].apiKey}
+                onChange={(event) =>
+                  onChange({
+                    ...settings,
+                    providers: {
+                      ...settings.providers,
+                      [key]: {
+                        ...settings.providers[key],
+                        apiKey: event.target.value,
+                      },
+                    },
+                  })
+                }
+                autoComplete="off"
+              />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+                {label} Model
+              </span>
+              <input
+                className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+                value={settings.providers[key].model}
+                onChange={(event) =>
+                  onChange({
+                    ...settings,
+                    providers: {
+                      ...settings.providers,
+                      [key]: {
+                        ...settings.providers[key],
+                        model: event.target.value,
+                      },
+                    },
+                  })
+                }
+                placeholder={modelPlaceholder}
+                list={`${key}-model-suggestions`}
+                autoComplete="off"
+              />
+              <datalist id={`${key}-model-suggestions`}>
+                {key === "speech" ? (
+                  <>
+                    <option value="qwen-audio-3.0-asr-flash" />
+                    <option value="fun-asr-flash" />
+                    <option value="qwen3-asr-flash" />
+                  </>
+                ) : key === "vision" ? (
+                  <>
+                    <option value="qwen-vl-plus" />
+                    <option value="qwen-vl-max" />
+                    <option value="qwen2.5-vl-72b-instruct" />
+                  </>
+                ) : (
+                  <>
+                    <option value="qwen-plus" />
+                    <option value="qwen-plus-2025-07-28" />
+                    <option value="qwen-turbo" />
+                    <option value="qwen-max" />
+                  </>
+                )}
+              </datalist>
+            </label>
+          </div>
+        ))}
+      </div>
+      <section className="space-y-4 rounded-xl border border-line bg-fog/30 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-ink">联网爆款研究</h3>
+            <p className="mt-1 text-xs leading-5 text-[#78857e]">
+              启用后由百炼大模型联网检索公开网页（标题、链接、摘要），并归纳可复核选题；
+              不等于平台官方爆款榜。默认用 qwen-plus 走 text-generation 联网；缓存按 owner 隔离 24 小时。
+              额度或限流时会自动切换备选模型，并依次尝试本页 Speech / Vision / LLM / Research 各 Key 槽位。
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <input
+              type="checkbox"
+              checked={settings.providers.webResearch.enabled}
+              onChange={(event) =>
+                updateWebResearch({ enabled: event.target.checked })
+              }
+            />
+            启用
+          </label>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block space-y-1.5">
             <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
-              {label} Key
+              Research Key（留空复用百炼 Key）
             </span>
             <input
               className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
-              value={settings.providers[key].apiKey}
+              value={settings.providers.webResearch.apiKey}
               onChange={(event) =>
-                onChange({
-                  ...settings,
-                  providers: {
-                    ...settings.providers,
-                    [key]: {
-                      ...settings.providers[key],
-                      apiKey: event.target.value,
-                    },
-                  },
-                })
+                updateWebResearch({ apiKey: event.target.value })
               }
+              placeholder="sk-..."
               autoComplete="off"
             />
           </label>
-        ))}
-      </div>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+              Native API Base URL
+            </span>
+            <input
+              className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+              value={settings.providers.webResearch.apiBaseUrl}
+              onChange={(event) =>
+                updateWebResearch({ apiBaseUrl: event.target.value })
+              }
+              placeholder={NATIVE_DASHSCOPE_RESEARCH_BASE_URL}
+              autoComplete="off"
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+              Research Model
+            </span>
+            <input
+              className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+              value={settings.providers.webResearch.model}
+              onChange={(event) =>
+                updateWebResearch({ model: event.target.value })
+              }
+              placeholder="qwen-plus"
+              list="web-research-model-suggestions"
+              autoComplete="off"
+            />
+            <datalist id="web-research-model-suggestions">
+              <option value="qwen-plus" />
+              <option value="qwen-plus-2025-07-28" />
+              <option value="qwen-turbo" />
+              <option value="qwen-max" />
+            </datalist>
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+              跨网时效（天）
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+              value={settings.providers.webResearch.freshnessDays}
+              onChange={(event) =>
+                updateWebResearch({ freshnessDays: Number(event.target.value) })
+              }
+            />
+          </label>
+        </div>
+        <p className="text-xs leading-5 text-[#78857e]">
+          安全限制：联网 Key 只会发送到 https://dashscope.aliyuncs.com；兼容模式 Base URL 不支持来源追溯。
+          保存时会自动把 compatible-mode 地址纠正为 Native API（/api/v1）。
+        </p>
+        <p className="rounded-lg border border-line bg-white px-3 py-2 text-xs leading-5 text-[#52615a]">
+          当前配置：{describeWebResearchConfig(settings)}
+        </p>
+        <p className="text-xs leading-5 text-[#78857e]">
+          若研究面板提示「免费额度已用尽」或「Model access denied」，请到百炼控制台充值、关闭「仅使用免费额度」，或确认 Key 有权调用所选模型与联网检索。
+        </p>
+      </section>
       <p className="text-xs leading-5 text-[#78857e]">
         已保存的密钥以脱敏形式显示。若不想改密钥，保留带 * 的内容即可。
+        各槽位 Key 与主模型在额度/限流时会自动降级（可在 .env 用 *_MODEL_FALLBACKS、DASHSCOPE_API_KEY_FALLBACKS 覆盖）。
       </p>
     </div>
   );

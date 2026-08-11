@@ -11,6 +11,7 @@ import {
   type ScriptGenerateRequest,
 } from "@/lib/script-workbench/production-guide";
 import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import { ensureViralEnhancements } from "@/lib/script-workbench/viral-plan";
 
 export type { ScriptGenerateRequest } from "@/lib/script-workbench/production-guide";
 
@@ -22,7 +23,7 @@ function withProductionGuide(
   request: ScriptGenerateRequest,
   output: ScriptDraftOutput,
 ): ScriptDraftOutput {
-  const next: ScriptDraftOutput = {
+  let next: ScriptDraftOutput = {
     ...output,
     productionGuide: buildProductionGuide(
       request,
@@ -30,6 +31,7 @@ function withProductionGuide(
     ),
     plainText: "",
   };
+  next = ensureViralEnhancements(request, next);
   next.plainText = outputToPlainText(next);
   return next;
 }
@@ -49,10 +51,9 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
         : topicText;
   const seconds = input.targetSeconds ?? (format === "showroom_koubo" ? 60 : 30);
   const titleSeed = shortHook(idea, 20);
+  const rewriteMode = input.rewriteMode ?? "polish";
 
-  const script = existing
-    ? existing
-    : format === "service_intro"
+  const generatedScript = format === "service_intro"
       ? [
           `很多人装修要找好几家，智能、净水、水电分开对接，又累又容易对不上。`,
           `我们做的是${topicText}相关的一站式服务：方案、施工、交付一条线跟到底。`,
@@ -72,6 +73,18 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
             : `拍的时候口播短一点，中间插产品特写和效果对比就够。`,
           `需要方案或报价，私信我，按你家情况给建议。`,
         ].join("");
+  const script = existing
+    ? rewriteMode === "preserve"
+      ? existing
+      : rewriteMode === "deep"
+        ? generatedScript
+        : [
+            `先说结果：${titleSeed || idea}。`,
+            existing,
+            input.ctaGoal?.trim() ||
+              "如果你也遇到同类问题，可以把现场情况发来一起判断。",
+          ].join("\n")
+    : generatedScript;
 
   const output: ScriptDraftOutput = {
     pipeline: "koubo",
@@ -127,7 +140,11 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
     timeline: [],
     gapsOrWarnings: existing
       ? [
-          "已采用你提供的当前脚本作为口播正文；标题/素材/字幕为配套建议",
+          rewriteMode === "preserve"
+            ? "已按保留原稿模式锁定口播正文；改进项仅写入逐句质检"
+            : rewriteMode === "deep"
+              ? "已按深度改写模式重组口播；发布前需复核事实与承诺边界"
+              : "已按适度润色模式优化开头、衔接与 CTA，保留原稿核心事实",
           `目标时长约 ${seconds} 秒；口播拍 2～3 条选一条`,
         ]
       : format === "showroom_koubo"

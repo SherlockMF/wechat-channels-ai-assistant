@@ -19,6 +19,10 @@ const createBodySchema = z.object({
   processKinds: z.array(scriptDraftProcessKindSchema).optional(),
   input: scriptDraftInputSchema,
   title: z.string().nullable().optional(),
+  researchSnapshotId: z.string().optional(),
+  selectedTopicCardId: z.string().optional(),
+  selectedResearchItemIds: z.array(z.string()).max(5).optional(),
+  parentScriptDraftId: z.string().uuid().optional(),
 });
 
 export async function GET(request: Request) {
@@ -55,13 +59,23 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const input = {
+      ...body.input,
+      researchSnapshotId:
+        body.researchSnapshotId ?? body.input.researchSnapshotId,
+      selectedTopicCardId:
+        body.selectedTopicCardId ?? body.input.selectedTopicCardId,
+      selectedResearchItemIds:
+        body.selectedResearchItemIds ?? body.input.selectedResearchItemIds,
+    };
     const draft = await repository.generateScriptDraft(ownerId, {
       format: body.format,
       topic: body.topic ?? null,
       subTopics: body.subTopics,
       processKinds: body.processKinds,
-      input: body.input,
+      input,
       title: body.title,
+      parentScriptDraftId: body.parentScriptDraftId,
     });
     return NextResponse.json({ draft }, { status: 201 });
   } catch (error) {

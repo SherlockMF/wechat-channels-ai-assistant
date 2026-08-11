@@ -15,6 +15,7 @@ const patchSchema = z.object({
   input: scriptDraftInputSchema.optional(),
   output: scriptDraftOutputSchema.nullable().optional(),
   status: scriptDraftStatusSchema.optional(),
+  editedPlainText: z.string().max(200_000).nullable().optional(),
 });
 
 export async function GET(

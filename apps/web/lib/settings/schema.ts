@@ -7,6 +7,16 @@ const providerBlockSchema = z.object({
   model: z.string().default(""),
 });
 
+const webResearchProviderSchema = z.object({
+  enabled: z.boolean().default(true),
+  apiKey: z.string().default(""),
+  apiBaseUrl: z
+    .string()
+    .default("https://dashscope.aliyuncs.com/api/v1"),
+  model: z.string().default("qwen-plus"),
+  freshnessDays: z.number().int().min(1).max(30).default(30),
+});
+
 export const userSettingsSchema = z.object({
   setupCompleted: z.boolean().default(false),
   dismissWizard: z.boolean().default(false),
@@ -19,6 +29,7 @@ export const userSettingsSchema = z.object({
       speech: providerBlockSchema.default({}),
       vision: providerBlockSchema.default({}),
       llm: providerBlockSchema.default({}),
+      webResearch: webResearchProviderSchema.default({}),
     })
     .default({}),
 });

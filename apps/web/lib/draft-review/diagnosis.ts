@@ -1,7 +1,321 @@
-import type { DiagnosisResult } from "@video-diagnosis/shared-types";
+import type {
+  DiagnosisResult,
+  DraftReviewScriptSnapshot,
+  ViralResearchSnapshot,
+} from "@video-diagnosis/shared-types";
 import type { AccountBaseline } from "@/lib/metrics/account";
 import type { DraftEvidenceManifest } from "@/lib/draft-review/evidence";
 import type { SimilarVideoSummary } from "@/lib/draft-review/similar-videos";
+
+type DetailedObservation = NonNullable<
+  DiagnosisResult["detailedObservations"]
+>[number];
+type ScriptAlignment = NonNullable<DiagnosisResult["scriptAlignment"]>;
+
+function excerpt(value: string | null | undefined, max = 180): string {
+  const normalized = (value ?? "").replace(/\s+/gu, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
+}
+
+function directFrameEvidence(
+  evidence: DraftEvidenceManifest,
+  startSecond: number,
+  endSecond: number,
+): string[] {
+  return (evidence.frames ?? [])
+    .filter(
+      (frame) =>
+        frame.duplicateOfSecond === null &&
+        frame.second >= startSecond &&
+        frame.second <= endSecond,
+    )
+    .flatMap((frame) => {
+      const items: string[] = [];
+      if (frame.description) {
+        items.push(`${frame.second.toFixed(1)}s 画面：${excerpt(frame.description, 120)}`);
+      }
+      if (frame.ocrText) {
+        items.push(`${frame.second.toFixed(1)}s OCR：${excerpt(frame.ocrText, 100)}`);
+      }
+      return items;
+    })
+    .slice(0, 5);
+}
+
+function timedTranscriptEvidence(
+  evidence: DraftEvidenceManifest,
+  startSecond: number,
+  endSecond: number,
+): string[] {
+  return (evidence.transcript?.segments ?? [])
+    .filter(
+      (segment) =>
+        segment.endSecond > startSecond && segment.startSecond < endSecond,
+    )
+    .slice(0, 4)
+    .map(
+      (segment) =>
+        `${segment.startSecond.toFixed(1)}-${segment.endSecond.toFixed(1)}s ASR：${excerpt(segment.text, 180)}`,
+    );
+}
+
+function observationRange(
+  startSecond: number,
+  endSecond: number,
+  durationSeconds: number,
+): { startSecond: number; endSecond: number } {
+  const start = Math.max(0, Math.min(startSecond, Math.max(0, durationSeconds - 0.05)));
+  const end = Math.max(start + 0.01, Math.min(durationSeconds, endSecond));
+  return { startSecond: start, endSecond: end };
+}
+
+function buildDetailedObservations(
+  evidence: DraftEvidenceManifest,
+): DetailedObservation[] {
+  const duration = evidence.durationSeconds;
+  const opening = observationRange(0, Math.min(3, duration), duration);
+  const middle = observationRange(
+    Math.min(3, duration / 3),
+    Math.min(10, Math.max(3.1, duration * 0.65)),
+    duration,
+  );
+  const tail = observationRange(Math.max(0, duration - 5), duration, duration);
+  const transcript = excerpt(evidence.transcript?.text, 220);
+  const openingEvidence = [
+    ...directFrameEvidence(evidence, opening.startSecond, opening.endSecond),
+    ...timedTranscriptEvidence(evidence, opening.startSecond, opening.endSecond),
+  ].slice(0, 6);
+  const middleEvidence = [
+    ...directFrameEvidence(evidence, middle.startSecond, middle.endSecond),
+    ...timedTranscriptEvidence(evidence, middle.startSecond, middle.endSecond),
+  ].slice(0, 6);
+  const tailEvidence = [
+    ...directFrameEvidence(evidence, tail.startSecond, tail.endSecond),
+    ...timedTranscriptEvidence(evidence, tail.startSecond, tail.endSecond),
+  ].slice(0, 6);
+  return [
+    {
+      ...opening,
+      evidence:
+        openingEvidence.length > 0
+          ? openingEvidence
+          : [
+              `前 3 秒检测到 ${evidence.sceneCutSeconds.filter((item) => item <= 3).length} 处镜头切换；缺少逐帧描述时需点开视频复核。`,
+            ],
+      issue: "首屏是否在 3 秒内兑现标题承诺仍是最优先发布门槛。",
+      priority: "high",
+      recommendation: "把结果/痛点、对象和收益分别落在首帧、首句口播和首屏字幕，三者用词一致。",
+      replacementExample: evidence.title
+        ? `首屏字幕：${excerpt(evidence.title, 32)}`
+        : "首屏字幕：具体对象 + 可验证结果",
+      expectedMetric: "completion_rate",
+      confidence: openingEvidence.length > 0 ? "medium" : "low",
+      nature: "inference",
+    },
+    {
+      ...middle,
+      evidence:
+        middleEvidence.length > 0
+          ? middleEvidence
+          : transcript
+            ? [`ASR 口播节选：${transcript}`]
+            : ["没有可用 ASR/OCR 文本，文案与字幕只能做结构性预警。"],
+      issue: "中前段需要逐句检查是否一段只承载一个主张，并有画面或事实承接。",
+      priority: "high",
+      recommendation: "删掉重复铺垫和绝对化词；每个主张后紧跟一个现场、数字、对比或操作证据。",
+      replacementExample: "主张一句 → 证据一句 → 对观众的具体意义一句。",
+      expectedMetric: "average_watch_seconds",
+      confidence: middleEvidence.length > 0 || transcript ? "medium" : "low",
+      nature: "inference",
+    },
+    {
+      ...tail,
+      evidence:
+        tailEvidence.length > 0
+          ? tailEvidence
+          : [
+              evidence.goal
+                ? `发布目标为「${excerpt(evidence.goal, 80)}」，需与结尾可见/可听 CTA 对照。`
+                : "未填写发布目标，无法确认结尾 CTA 是否服务单一转化动作。",
+            ],
+      issue: "结尾应只保留一个可执行动作，并与本条发布目标一致。",
+      priority: evidence.goal ? "medium" : "high",
+      recommendation: "删掉并列 CTA；明确谁在什么场景下评论、私信或关注，以及能得到什么。",
+      replacementExample: evidence.goal
+        ? `想要${excerpt(evidence.goal, 36)}，评论区留下你的具体场景。`
+        : "想拿到同场景清单，评论区留“清单”。",
+      expectedMetric: evidence.goal ? "comment_rate" : "follow_rate",
+      confidence: tailEvidence.length > 0 ? "medium" : "low",
+      nature: "inference",
+    },
+  ];
+}
+
+function characterBigrams(value: string): Set<string> {
+  const normalized = value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+  const result = new Set<string>();
+  for (let index = 0; index < normalized.length - 1; index += 1) {
+    result.add(normalized.slice(index, index + 2));
+  }
+  return result;
+}
+
+function overlap(left: string, right: string): number {
+  const a = characterBigrams(left);
+  const b = characterBigrams(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const value of a) if (b.has(value)) shared += 1;
+  return shared / Math.max(1, Math.min(a.size, b.size));
+}
+
+function matchStatus(
+  expected: string,
+  observed: string,
+): "matched" | "partial" | "missing" | "not_available" {
+  if (!expected.trim() || !observed.trim()) return "not_available";
+  const score = overlap(expected, observed);
+  if (score >= 0.58) return "matched";
+  if (score >= 0.22) return "partial";
+  return "missing";
+}
+
+function alignmentItem(
+  expected: string,
+  observed: string,
+  recommendation: string,
+): ScriptAlignment["openingPromise"] {
+  return {
+    status: matchStatus(expected, observed),
+    expected: excerpt(expected) || "脚本未提供",
+    observed: excerpt(observed) || "现有 ASR/OCR 无法确认",
+    recommendation,
+  };
+}
+
+function buildScriptAlignment(
+  evidence: DraftEvidenceManifest,
+  snapshot: DraftReviewScriptSnapshot | null,
+): ScriptAlignment {
+  if (!snapshot?.script.trim()) {
+    const unavailable = (label: string): ScriptAlignment["openingPromise"] => ({
+      status: "not_available",
+      expected: "未关联来源脚本",
+      observed: label,
+      recommendation: "关联脚本工作台草稿后重新审片，系统会冻结当时版本再做逐项对齐。",
+    });
+    return {
+      openingPromise: unavailable("无法对照开头承诺"),
+      coreMessage: unavailable("无法对照核心信息"),
+      proofAssets: unavailable("无法对照证据资产"),
+      cta: unavailable("无法对照 CTA"),
+      omissions: [],
+      deviations: [],
+    };
+  }
+  const script = snapshot.script.trim();
+  const transcript = evidence.transcript?.text?.trim() ?? "";
+  const ocr = (evidence.frames ?? [])
+    .filter((frame) => frame.duplicateOfSecond === null && frame.ocrText)
+    .map((frame) => frame.ocrText)
+    .join(" ");
+  const observedAll = `${transcript} ${ocr}`.trim();
+  const proofLines = script
+    .split(/[。！？\n]/u)
+    .filter((line) => /数据|案例|现场|对比|实测|证明|因为|结果/u.test(line))
+    .join("；");
+  const openingPromise = alignmentItem(
+    script.slice(0, 100),
+    `${transcript.slice(0, 130)} ${ocr.slice(0, 80)}`,
+    "让视频首句和首屏字幕复述同一个承诺；若为创意改写，明确保留了什么、改了什么。",
+  );
+  const coreMessage = alignmentItem(
+    script.slice(0, Math.min(500, script.length)),
+    observedAll.slice(0, 900),
+    "逐段核对脚本主张是否在口播或字幕出现，缺失主张补回，偏离内容单独标注。",
+  );
+  const proofAssets = alignmentItem(
+    proofLines,
+    observedAll,
+    "脚本写到数字、对比、案例或现场时，画面必须出现对应证据；没有素材就降低承诺强度。",
+  );
+  const cta = alignmentItem(
+    script.slice(Math.max(0, script.length - 140)),
+    observedAll.slice(Math.max(0, observedAll.length - 220)),
+    "结尾只保留脚本约定的一个动作，并让口播与字幕 CTA 同义。",
+  );
+  const pairs: Array<[string, ScriptAlignment["openingPromise"]]> = [
+    ["开头承诺", openingPromise],
+    ["核心信息", coreMessage],
+    ["证据资产", proofAssets],
+    ["CTA", cta],
+  ];
+  return {
+    openingPromise,
+    coreMessage,
+    proofAssets,
+    cta,
+    omissions: pairs
+      .filter(([, item]) => item.status === "missing")
+      .map(([label]) => `${label}在现有 ASR/OCR 中未找到足够对应内容。`),
+    deviations: pairs
+      .filter(([, item]) => item.status === "partial")
+      .map(([label]) => `${label}仅部分对齐，需人工逐句复核改写是否有意。`),
+  };
+}
+
+function buildPublishChecklist(
+  evidence: DraftEvidenceManifest,
+  alignment: ScriptAlignment,
+): NonNullable<DiagnosisResult["publishChecklist"]> {
+  const alignmentNeedsFix = [
+    alignment.openingPromise,
+    alignment.coreMessage,
+    alignment.proofAssets,
+    alignment.cta,
+  ].some((item) => item.status === "missing");
+  return [
+    {
+      item: "首屏标题、口播、字幕承诺一致",
+      status: alignment.openingPromise.status === "matched" ? "ready" : "verify",
+      reason:
+        alignment.openingPromise.status === "matched"
+          ? "自动对齐达到匹配阈值，仍建议发布前快速通看。"
+          : "自动证据不足或仅部分匹配，需要人工在 0～3 秒确认。",
+    },
+    {
+      item: "脚本核心主张和证据素材均已落片",
+      status: alignmentNeedsFix ? "fix" : "verify",
+      reason: alignmentNeedsFix
+        ? "至少一项脚本要素未在 ASR/OCR 中找到对应内容。"
+        : "自动识别不能替代对画面细节和事实来源的人工核验。",
+    },
+    {
+      item: "字幕无错字、数字和绝对化承诺已核验",
+      status: (evidence.frames ?? []).some((frame) => frame.ocrText)
+        ? "verify"
+        : "fix",
+      reason: (evidence.frames ?? []).some((frame) => frame.ocrText)
+        ? "已取得部分 OCR，可按时间帧逐条核对。"
+        : "没有可用 OCR，发布前必须人工完整检查字幕。",
+    },
+    {
+      item: "声音清晰且无意外静音",
+      status: evidence.silenceRanges.length > 0 ? "verify" : "ready",
+      reason:
+        evidence.silenceRanges.length > 0
+          ? `检测到 ${evidence.silenceRanges.length} 段静音/低声段，需确认是否为有意留白。`
+          : "自动检测未发现超过阈值的静音段。",
+    },
+    {
+      item: "结尾只保留一个转化动作",
+      status: evidence.goal ? "verify" : "fix",
+      reason: evidence.goal
+        ? `需对照发布目标「${excerpt(evidence.goal, 60)}」通看尾段。`
+        : "未填写发布目标，无法确认 CTA 是否聚焦。",
+    },
+  ];
+}
 
 function percent(value: number | null): string {
   return value === null ? "暂无" : `${(value * 100).toFixed(1)}%`;
@@ -51,6 +365,8 @@ export function buildDraftDiagnosis(
   evidence: DraftEvidenceManifest,
   baseline: AccountBaseline | null,
   similarVideos: SimilarVideoSummary[] = [],
+  scriptSnapshot: DraftReviewScriptSnapshot | null = null,
+  researchSnapshot: ViralResearchSnapshot | null = null,
 ): DiagnosisResult {
   const duration = evidence.durationSeconds;
   const hasBaseline = baseline !== null && baseline.all.completionRate?.q2 !== undefined;
@@ -89,6 +405,24 @@ export function buildDraftDiagnosis(
       }，播放 ${top.views ?? "暂无"}。`,
     );
   }
+  if (evidence.transcript?.text) {
+    facts.push(
+      `已取得口播 ASR 全文（${evidence.transcript.provider}/${evidence.transcript.model}）；模型转写仍需人工核对专有名词与数字。`,
+    );
+  } else {
+    facts.push("未取得可用口播 ASR，文案判断不能视为逐句事实核验。");
+  }
+  const ocrCount = (evidence.frames ?? []).filter((frame) => frame.ocrText).length;
+  facts.push(
+    ocrCount > 0
+      ? `已从 ${ocrCount} 个去重前时间帧取得 OCR 字幕证据。`
+      : "未取得可用 OCR 字幕证据，字幕需人工完整检查。",
+  );
+  if (researchSnapshot) {
+    facts.push(
+      `联网研究快照 ${researchSnapshot.id} 获取于 ${researchSnapshot.fetchedAt}，含 ${researchSnapshot.items.length} 条来源；仅作为选题/结构对照，不代表本条必然表现。`,
+    );
+  }
 
   const hookEnd = Math.min(3, duration);
   const midStart = Math.min(3, duration);
@@ -96,6 +430,9 @@ export function buildDraftDiagnosis(
   const tailStart = Math.max(0, duration - Math.min(6, duration));
   const openingSlow =
     evidence.sceneCutSeconds.filter((second) => second <= 3).length <= 1;
+  const scriptAlignment = buildScriptAlignment(evidence, scriptSnapshot);
+  const detailedObservations = buildDetailedObservations(evidence);
+  const publishChecklist = buildPublishChecklist(evidence, scriptAlignment);
 
   return {
     executiveSummary: openingSlow
@@ -298,6 +635,9 @@ export function buildDraftDiagnosis(
       transitionSuggestions: ["段落切换用短音效或硬切，避免长叠化"],
       avoid: ["全程同一强度 BGM", "结尾突然静音"],
     },
+    detailedObservations,
+    scriptAlignment,
+    publishChecklist,
     limitations: [
       "本报告基于媒体证据包与账号基线启发，不含真实逐秒留存数据。",
       hasBaseline
@@ -306,6 +646,16 @@ export function buildDraftDiagnosis(
       similarVideos.length > 0
         ? "标题建议参考标签相似历史视频的标题与指标，不构成流量承诺。"
         : "相似历史样本不足时，标题建议主要来自标签/标题改写启发式。",
+      scriptSnapshot
+        ? `脚本对齐使用创建该视频版本时冻结的脚本快照（${scriptSnapshot.scriptUpdatedAt}），字符重合只用于定位待复核项。`
+        : "未关联来源脚本，无法判断成片是否遗漏或偏离脚本承诺。",
+      researchSnapshot
+        ? "联网研究快照有时效和样本边界，热点、公开指标与链接需在发布前再次核验。"
+        : "未提供联网研究快照，本报告没有声称使用实时热点或站外爆款数据。",
+      ...(evidence.limitations ?? []),
+      ...(researchSnapshot?.limitations ?? []).map(
+        (item) => `联网研究限制：${item}`,
+      ),
       "文案与字幕的合理性、专业性评估依赖画面证据与模型理解，发布前仍需人工终审。",
     ],
   };

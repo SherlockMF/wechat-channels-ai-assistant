@@ -84,7 +84,7 @@ export function ScriptList() {
   }, [items, formatFilter, topicFilter]);
 
   async function copyText(item: ScriptDraft) {
-    const text = item.output?.plainText || item.ideaSummary;
+    const text = item.editedPlainText || item.output?.plainText || item.ideaSummary;
     await navigator.clipboard.writeText(text);
     setMessage(`已复制：${resolveDraftListTitle(item)}`);
   }

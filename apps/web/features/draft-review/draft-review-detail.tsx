@@ -39,6 +39,70 @@ const analysisModeLabel: Record<string, string> = {
   draft_dashscope: "发布前审片（阿里云百炼）",
 };
 
+const stageLabel: Record<string, string> = {
+  uploaded: "等待进入分析队列",
+  extracting_evidence: "准备媒体证据",
+  extracting_audio: "提取 16kHz 单声道音轨",
+  transcribing: "识别口播",
+  extracting_frames: "按时间码提取关键帧",
+  recognizing_subtitles: "识别画面与字幕 OCR",
+  analyzing: "生成证据化审片意见",
+  completed: "分析完成",
+  failed: "分析失败",
+};
+
+const severityLabel: Record<string, string> = {
+  high: "高优先级",
+  medium: "中优先级",
+  low: "低优先级",
+};
+
+const confidenceLabel: Record<string, string> = {
+  high: "高置信",
+  medium: "中置信",
+  low: "低置信",
+};
+
+const performanceLabel: Record<string, string> = {
+  low: "偏低",
+  normal: "正常",
+  high: "偏高",
+};
+
+const metricLabel: Record<string, string> = {
+  completion_rate: "完播率",
+  average_watch_seconds: "平均观看时长",
+  like_rate: "点赞率",
+  comment_rate: "评论率",
+  share_rate: "分享率",
+  follow_rate: "关注率",
+};
+
+const actionLabel: Record<string, string> = {
+  delete: "删除",
+  trim: "精剪",
+  replace: "替换",
+  move_forward: "前移",
+  speed_up: "加速",
+  add_subtitle: "补字幕",
+  change_audio: "调整声音",
+  reshoot: "补拍",
+  keep: "保留",
+};
+
+const alignmentStatusLabel: Record<string, string> = {
+  matched: "已对齐",
+  partial: "部分对齐",
+  missing: "疑似缺失",
+  not_available: "证据不足",
+};
+
+const checklistStatusLabel: Record<string, string> = {
+  ready: "可发布",
+  fix: "先修改",
+  verify: "待人工确认",
+};
+
 interface VersionSummary {
   id: string;
   versionNumber: number;
@@ -99,7 +163,7 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
   }, [draftReviewId]);
 
   useEffect(() => {
-    if (payload?.draft.status !== "processing") return;
+    if (!payload || !["uploaded", "processing"].includes(payload.draft.status)) return;
     const handle = window.setInterval(() => {
       void load(versionId).catch(() => undefined);
     }, 2500);
@@ -201,7 +265,7 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
     1;
   const previousNumber = currentNumber > 1 ? currentNumber - 1 : null;
   const atVersionCap = versions.length >= DRAFT_REVIEW_MAX_VERSIONS;
-  const analyzing = payload.draft.status === "processing";
+  const analyzing = ["uploaded", "processing"].includes(payload.draft.status);
 
   return (
     <div className="space-y-4">
@@ -371,6 +435,11 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                   {analysisModeLabel[payload.analysisMode] ?? "发布前审片"}
                 </Badge>
                 <Badge tone="neutral">v{currentNumber}</Badge>
+                {payload.draft.sourceScriptDraftId && (
+                  <Link href={`/scripts/${payload.draft.sourceScriptDraftId}`}>
+                    <Badge tone="info">已关联冻结脚本</Badge>
+                  </Link>
+                )}
                 {payload.draft.goal && <Badge>{payload.draft.goal}</Badge>}
                 {(payload.draft.tags ?? []).map((tag) => (
                   <Badge key={tag} tone="neutral">
@@ -441,11 +510,157 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                 <p className="text-sm leading-7 text-[#3f4b45]">
                   {diagnosis.executiveSummary}
                 </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge tone="neutral">
+                    表现判断：
+                    {performanceLabel[diagnosis.dataAssessment.performanceLevel] ??
+                      diagnosis.dataAssessment.performanceLevel}
+                  </Badge>
+                  <Badge tone="neutral">
+                    样本置信度：
+                    {confidenceLabel[diagnosis.dataAssessment.sampleConfidence] ??
+                      diagnosis.dataAssessment.sampleConfidence}
+                  </Badge>
+                </div>
                 <ul className="mt-4 space-y-2 text-sm text-[#52615a]">
                   {diagnosis.dataAssessment.facts.map((fact) => (
                     <li key={fact}>• {fact}</li>
                   ))}
                 </ul>
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">逐时码证据与修改意见</h2>
+                <p className="mt-2 text-xs leading-5 text-[#7a8680]">
+                  每条意见都标注事实/推断、证据和置信度；点击秒点可直接回看。
+                </p>
+                <div className="mt-4 space-y-4">
+                  {(diagnosis.detailedObservations ?? []).map((observation, index) => (
+                    <div
+                      key={`${observation.startSecond}-${observation.issue}-${index}`}
+                      className="rounded-xl border border-line p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge
+                            tone={observation.priority === "high" ? "warning" : "neutral"}
+                          >
+                            {severityLabel[observation.priority] ?? observation.priority}
+                          </Badge>
+                          <Badge tone="neutral">
+                            {observation.nature === "fact" ? "事实观察" : "证据推断"}
+                          </Badge>
+                          <Badge tone="neutral">
+                            {confidenceLabel[observation.confidence] ?? observation.confidence}
+                          </Badge>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => seek(observation.startSecond)}
+                          className="text-xs font-bold text-pine hover:underline"
+                        >
+                          {observation.startSecond.toFixed(1)}s –{" "}
+                          {observation.endSecond.toFixed(1)}s
+                        </button>
+                      </div>
+                      <p className="mt-3 text-sm font-bold text-ink">{observation.issue}</p>
+                      <div className="mt-2 rounded-lg bg-fog p-3 text-xs leading-5 text-[#52615a]">
+                        {observation.evidence.map((item) => (
+                          <p key={item}>• {item}</p>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-sm font-semibold text-pine">
+                        怎么改：{observation.recommendation}
+                      </p>
+                      <p className="mt-2 rounded-lg bg-[#f4faf6] px-3 py-2 text-sm text-[#3f4b45]">
+                        替换示例：{observation.replacementExample}
+                      </p>
+                      <p className="mt-2 text-xs text-[#7a8680]">
+                        预期影响：
+                        {metricLabel[observation.expectedMetric] ?? observation.expectedMetric}
+                      </p>
+                    </div>
+                  ))}
+                  {(diagnosis.detailedObservations?.length ?? 0) === 0 && (
+                    <p className="text-sm text-[#7a8680]">
+                      当前结果未包含逐时码证据，可重新分析以生成增强版意见。
+                    </p>
+                  )}
+                </div>
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">脚本与成片对齐</h2>
+                {diagnosis.scriptAlignment ? (
+                  <>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {(
+                        [
+                          ["开头承诺", diagnosis.scriptAlignment.openingPromise],
+                          ["核心信息", diagnosis.scriptAlignment.coreMessage],
+                          ["证据素材", diagnosis.scriptAlignment.proofAssets],
+                          ["结尾行动号召", diagnosis.scriptAlignment.cta],
+                        ] as const
+                      ).map(([label, item]) => (
+                        <div key={label} className="rounded-xl border border-line p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-bold">{label}</p>
+                            <Badge tone={item.status === "missing" ? "warning" : "neutral"}>
+                              {alignmentStatusLabel[item.status] ?? item.status}
+                            </Badge>
+                          </div>
+                          <p className="mt-3 text-xs leading-5 text-[#52615a]">
+                            <span className="font-bold text-ink">脚本预期：</span>
+                            {item.expected}
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-[#52615a]">
+                            <span className="font-bold text-ink">成片观察：</span>
+                            {item.observed}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-pine">
+                            {item.recommendation}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    {(diagnosis.scriptAlignment.omissions.length > 0 ||
+                      diagnosis.scriptAlignment.deviations.length > 0) && (
+                      <div className="mt-4 rounded-xl bg-fog p-4 text-sm leading-6 text-[#52615a]">
+                        {diagnosis.scriptAlignment.omissions.map((item) => (
+                          <p key={`omission-${item}`}>• 遗漏：{item}</p>
+                        ))}
+                        {diagnosis.scriptAlignment.deviations.map((item) => (
+                          <p key={`deviation-${item}`}>• 偏离：{item}</p>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-[#7a8680]">当前结果未包含脚本对齐。</p>
+                )}
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">发布前检查单</h2>
+                <div className="mt-4 space-y-3">
+                  {(diagnosis.publishChecklist ?? []).map((item) => (
+                    <div
+                      key={item.item}
+                      className="flex flex-col gap-2 rounded-xl border border-line p-4 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-bold">{item.item}</p>
+                        <p className="mt-1 text-xs leading-5 text-[#66736c]">{item.reason}</p>
+                      </div>
+                      <Badge tone={item.status === "fix" ? "warning" : "neutral"}>
+                        {checklistStatusLabel[item.status] ?? item.status}
+                      </Badge>
+                    </div>
+                  ))}
+                  {(diagnosis.publishChecklist?.length ?? 0) === 0 && (
+                    <p className="text-sm text-[#7a8680]">当前结果未包含发布检查单。</p>
+                  )}
+                </div>
               </Card>
 
               <Card className="p-6">
@@ -460,9 +675,17 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                       className="rounded-xl bg-fog p-4"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-bold">
-                          {categoryLabel[problem.category] ?? problem.category}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-bold">
+                            {categoryLabel[problem.category] ?? problem.category}
+                          </p>
+                          <Badge tone={problem.severity === "high" ? "warning" : "neutral"}>
+                            {severityLabel[problem.severity] ?? problem.severity}
+                          </Badge>
+                          <Badge tone="neutral">
+                            {confidenceLabel[problem.confidence] ?? problem.confidence}
+                          </Badge>
+                        </div>
                         <button
                           type="button"
                           onClick={() => seek(problem.startSecond)}
@@ -472,8 +695,25 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                         </button>
                       </div>
                       <p className="mt-2 text-sm text-[#52615a]">{problem.inference}</p>
+                      {problem.contentEvidence.length > 0 && (
+                        <div className="mt-3 rounded-lg bg-white/70 p-3 text-xs leading-5 text-[#52615a]">
+                          <p className="font-bold text-ink">内容证据</p>
+                          {problem.contentEvidence.map((item) => (
+                            <p key={item}>• {item}</p>
+                          ))}
+                        </div>
+                      )}
+                      {problem.dataEvidence.length > 0 && (
+                        <div className="mt-2 text-xs leading-5 text-[#66736c]">
+                          <span className="font-bold">数据依据：</span>
+                          {problem.dataEvidence.join("；")}
+                        </div>
+                      )}
                       <p className="mt-2 text-sm font-semibold text-pine">
                         建议：{problem.recommendation}
+                      </p>
+                      <p className="mt-1 text-xs text-[#7a8680]">
+                        预期影响：{metricLabel[problem.expectedMetric] ?? problem.expectedMetric}
                       </p>
                     </div>
                   ))}
@@ -493,10 +733,65 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
                     >
                       <p className="text-sm font-bold">
                         {item.startSecond.toFixed(1)}s – {item.endSecond.toFixed(1)}s ·{" "}
-                        {item.action}
+                        {actionLabel[item.action] ?? item.action}
+                        {item.requiresReshoot ? " · 需补拍" : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-[#7a8680]">
+                        原内容：{item.originalContent}
+                        {item.sourceAsset
+                          ? `；取材 ${item.sourceAsset.sourceStartSecond.toFixed(1)}–${item.sourceAsset.sourceEndSecond.toFixed(1)}s`
+                          : ""}
                       </p>
                       <p className="mt-1 text-sm text-[#52615a]">{item.problem}</p>
                       <p className="mt-2 text-sm text-pine">{item.replacementContent}</p>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">新版开头分镜</h2>
+                <div className="mt-4 space-y-3">
+                  {diagnosis.revisedOpening.map((item) => (
+                    <div
+                      key={`${item.startSecond}-${item.endSecond}-${item.subtitle}`}
+                      className="rounded-xl border border-line p-4"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => seek(item.startSecond)}
+                        className="text-xs font-bold text-pine hover:underline"
+                      >
+                        {item.startSecond.toFixed(1)}s – {item.endSecond.toFixed(1)}s
+                      </button>
+                      <div className="mt-3 grid gap-2 text-sm leading-6 text-[#52615a] sm:grid-cols-2">
+                        <p><span className="font-bold text-ink">画面：</span>{item.visual}</p>
+                        <p><span className="font-bold text-ink">口播：</span>{item.voiceover}</p>
+                        <p><span className="font-bold text-ink">字幕：</span>{item.subtitle}</p>
+                        <p><span className="font-bold text-ink">声音：</span>{item.audio}</p>
+                        <p><span className="font-bold text-ink">节奏：</span>{item.editingRhythm}</p>
+                        <p><span className="font-bold text-ink">素材：</span>{item.requiresReshoot ? "需补拍" : "可用现有素材"}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">钩子备选</h2>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {diagnosis.hookAlternatives.map((item) => (
+                    <div key={`${item.type}-${item.voiceover}`} className="rounded-xl bg-fog p-4">
+                      <Badge tone="neutral">
+                        {item.type === "result"
+                          ? "结果型"
+                          : item.type === "pain_point"
+                            ? "痛点型"
+                            : "悬念型"}
+                      </Badge>
+                      <p className="mt-3 text-sm font-bold text-ink">{item.voiceover}</p>
+                      <p className="mt-2 text-xs text-[#52615a]">字幕：{item.subtitle}</p>
+                      <p className="mt-1 text-xs text-[#52615a]">画面：{item.visual}</p>
                     </div>
                   ))}
                 </div>
@@ -567,13 +862,44 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
               </Card>
 
               <Card className="p-6">
-                <h2 className="font-display text-xl font-semibold">文案与 CTA</h2>
+                <h2 className="font-display text-xl font-semibold">文案与行动号召</h2>
+                <p className="mt-3 text-xs leading-5 text-[#7a8680]">
+                  原内容摘要：{diagnosis.copySuggestions.originalSummary}
+                </p>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3f4b45]">
                   {diagnosis.copySuggestions.revisedFullScript}
                 </p>
-                <p className="mt-4 text-sm font-semibold text-pine">
-                  CTA：{diagnosis.copySuggestions.cta}
+                <p className="mt-4 whitespace-pre-wrap rounded-xl bg-fog p-4 text-sm leading-6 text-[#3f4b45]">
+                  <span className="font-bold">字幕版：</span>
+                  {diagnosis.copySuggestions.subtitleVersion}
                 </p>
+                <p className="mt-4 text-sm font-semibold text-pine">
+                  行动号召：{diagnosis.copySuggestions.cta}
+                </p>
+              </Card>
+
+              <Card className="p-6">
+                <h2 className="font-display text-xl font-semibold">声音建议</h2>
+                <div className="mt-3 space-y-2 text-sm leading-6 text-[#3f4b45]">
+                  <p><span className="font-bold">当前问题：</span>{diagnosis.audioSuggestions.currentIssues.join("；") || "无"}</p>
+                  <p><span className="font-bold">音乐情绪：</span>{diagnosis.audioSuggestions.musicMood}</p>
+                  {diagnosis.audioSuggestions.bpmRange && (
+                    <p><span className="font-bold">BPM：</span>{diagnosis.audioSuggestions.bpmRange}</p>
+                  )}
+                  <p><span className="font-bold">开头：</span>{diagnosis.audioSuggestions.openingAudioAction}</p>
+                  <p><span className="font-bold">人声 / 音乐：</span>{diagnosis.audioSuggestions.voiceMusicBalance}</p>
+                  <p><span className="font-bold">转场：</span>{diagnosis.audioSuggestions.transitionSuggestions.join("；") || "无"}</p>
+                  <p><span className="font-bold">避免：</span>{diagnosis.audioSuggestions.avoid.join("；") || "无"}</p>
+                </div>
+              </Card>
+
+              <Card className="border-[#ead8b7] bg-[#fffaf1] p-6">
+                <h2 className="font-display text-xl font-semibold">证据边界与人工复核</h2>
+                <ul className="mt-3 space-y-2 text-sm leading-6 text-[#685f50]">
+                  {diagnosis.limitations.map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
               </Card>
 
               <div className="flex flex-wrap gap-3">
@@ -589,7 +915,7 @@ export function DraftReviewDetail({ draftReviewId }: { draftReviewId: string }) 
             <Card className="p-6">
               <EmptyState
                 title="正在分析"
-                description={`当前步骤：${payload.draft.currentStep}`}
+                description={`当前步骤：${stageLabel[payload.draft.currentStep] ?? payload.draft.currentStep}`}
               />
               <div className="mt-4">
                 <Progress value={payload.draft.progress} />

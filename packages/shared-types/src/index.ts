@@ -183,6 +183,73 @@ export const diagnosisResultSchema = z.object({
     transitionSuggestions: z.array(z.string()),
     avoid: z.array(z.string()),
   }),
+  /** 证据化的逐时码观察；保留 primaryProblems 作为 Top 3 摘要。 */
+  detailedObservations: z
+    .array(
+      z
+        .object({
+          startSecond: z.number().nonnegative(),
+          endSecond: z.number().positive(),
+          evidence: z.array(z.string()).min(1),
+          issue: z.string(),
+          priority: z.enum(["high", "medium", "low"]),
+          recommendation: z.string(),
+          replacementExample: z.string(),
+          expectedMetric: z.enum([
+            "completion_rate",
+            "average_watch_seconds",
+            "like_rate",
+            "comment_rate",
+            "share_rate",
+            "follow_rate",
+          ]),
+          confidence: sampleConfidenceSchema,
+          nature: z.enum(["fact", "inference"]),
+        })
+        .refine((value) => value.endSecond > value.startSecond, {
+          message: "观察结束时间必须晚于开始时间",
+        }),
+    )
+    .optional(),
+  scriptAlignment: z
+    .object({
+      openingPromise: z.object({
+        status: z.enum(["matched", "partial", "missing", "not_available"]),
+        expected: z.string(),
+        observed: z.string(),
+        recommendation: z.string(),
+      }),
+      coreMessage: z.object({
+        status: z.enum(["matched", "partial", "missing", "not_available"]),
+        expected: z.string(),
+        observed: z.string(),
+        recommendation: z.string(),
+      }),
+      proofAssets: z.object({
+        status: z.enum(["matched", "partial", "missing", "not_available"]),
+        expected: z.string(),
+        observed: z.string(),
+        recommendation: z.string(),
+      }),
+      cta: z.object({
+        status: z.enum(["matched", "partial", "missing", "not_available"]),
+        expected: z.string(),
+        observed: z.string(),
+        recommendation: z.string(),
+      }),
+      omissions: z.array(z.string()).default([]),
+      deviations: z.array(z.string()).default([]),
+    })
+    .optional(),
+  publishChecklist: z
+    .array(
+      z.object({
+        item: z.string(),
+        status: z.enum(["ready", "fix", "verify"]),
+        reason: z.string(),
+      }),
+    )
+    .optional(),
   limitations: z.array(z.string()).min(1),
 });
 
@@ -301,6 +368,17 @@ export interface DraftReviewVersion {
   errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
+  /** 创建版本时冻结的脚本依据，避免后续改稿影响历史审片。 */
+  scriptSnapshot?: DraftReviewScriptSnapshot | null;
+}
+
+export interface DraftReviewScriptSnapshot {
+  scriptDraftId: string;
+  scriptUpdatedAt: string;
+  title: string | null;
+  script: string;
+  subtitleBeats: string[];
+  researchSnapshotId: string | null;
 }
 
 export interface DraftReview {
@@ -333,6 +411,8 @@ export interface DraftReview {
   errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
+  /** 可选关联的来源脚本；一份脚本可对应多条审片会话。 */
+  sourceScriptDraftId?: string | null;
 }
 
 export interface DraftReviewResult {
@@ -390,6 +470,88 @@ export interface DraftCoverBrief {
   createdAt: string;
   completedAt: string | null;
 }
+
+export const viralResearchEvidenceLevelSchema = z.enum([
+  "verified_metric",
+  "public_source",
+  "account_history",
+]);
+
+export const viralResearchItemSchema = z.object({
+  id: z.string(),
+  // "douyin" retained only so older research snapshots still parse.
+  sourceType: z.enum(["dashscope", "douyin", "owned_history"]),
+  title: z.string(),
+  url: z.string().url().optional(),
+  site: z.string().optional(),
+  author: z.string().optional(),
+  publishedAt: z.string().optional(),
+  snippet: z.string().optional(),
+  evidenceLevel: viralResearchEvidenceLevelSchema,
+  visibleMetrics: z
+    .object({
+      views: z.number().nonnegative().optional(),
+      likes: z.number().nonnegative().optional(),
+      comments: z.number().nonnegative().optional(),
+      shares: z.number().nonnegative().optional(),
+      favorites: z.number().nonnegative().optional(),
+      recommends: z.number().nonnegative().optional(),
+    })
+    .optional(),
+  relevanceReasons: z.array(z.string()).default([]),
+  trendSignal: z.string().optional(),
+  accountFit: z
+    .object({
+      level: z.enum(["low", "medium", "high", "unknown"]),
+      reasons: z.array(z.string()),
+    })
+    .optional(),
+});
+
+export const viralResearchTopicCardSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  whyNow: z.string(),
+  targetAudience: z.string(),
+  sourceIds: z.array(z.string()),
+  reusableStructures: z.array(z.string()),
+  originalAngle: z.string(),
+  requiredEvidence: z.array(z.string()),
+  productionCost: z.enum(["low", "medium", "high"]),
+  risks: z.array(z.string()),
+});
+
+export const viralResearchSnapshotSchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  query: z.object({
+    topic: z.string(),
+    format: z.string().optional(),
+    audience: z.string().optional(),
+    contentGoal: z.string().optional(),
+    region: z.string().optional(),
+  }),
+  provider: z.string(),
+  searchPerformed: z.boolean(),
+  fetchedAt: z.string(),
+  expiresAt: z.string(),
+  items: z.array(viralResearchItemSchema).max(10),
+  topicCards: z.array(viralResearchTopicCardSchema).max(3),
+  commonPatterns: z.array(z.string()),
+  limitations: z.array(z.string()),
+  degradedReason: z.string().nullable().optional(),
+});
+
+export type ViralResearchEvidenceLevel = z.infer<
+  typeof viralResearchEvidenceLevelSchema
+>;
+export type ViralResearchItem = z.infer<typeof viralResearchItemSchema>;
+export type ViralResearchTopicCard = z.infer<
+  typeof viralResearchTopicCardSchema
+>;
+export type ViralResearchSnapshot = z.infer<
+  typeof viralResearchSnapshotSchema
+>;
 
 export const scriptDraftFormatSchema = z.enum([
   "koubo",
@@ -470,6 +632,85 @@ export const scriptProductionGuideSchema = z
     }
   });
 
+export const scriptRewriteModeSchema = z.enum(["preserve", "polish", "deep"]);
+
+export const scriptViralPlanSchema = z.object({
+  researchStatus: z.enum(["verified", "unverified", "skipped"]),
+  topicAngle: z.string(),
+  whyNow: z.string(),
+  targetAudience: z.string(),
+  hookMechanisms: z
+    .array(
+      z.object({
+        mechanism: z.enum([
+          "result",
+          "loss_aversion",
+          "contrarian",
+          "checklist",
+          "real_case",
+          "new_technology",
+          "custom",
+        ]),
+        hook: z.string(),
+      }),
+    )
+    .max(3),
+  coverCopy: z.string(),
+  evidenceBeats: z.array(
+    z.object({
+      section: z.string(),
+      claim: z.string(),
+      evidenceNeeded: z.string(),
+      voiceover: z.string().optional(),
+      visual: z.string().optional(),
+      subtitle: z.string().optional(),
+      audio: z.string().optional(),
+    }),
+  ),
+  publishingMetrics: z.array(
+    z.object({
+      metric: z.string(),
+      hypothesis: z.string(),
+    }),
+  ),
+  sourceIds: z.array(z.string()),
+  limitations: z.array(z.string()),
+});
+
+export const scriptReviewSchema = z.object({
+  summary: z.string(),
+  lineIssues: z.array(
+    z.object({
+      original: z.string(),
+      problem: z.string(),
+      replacement: z.string(),
+      reason: z.string(),
+      priority: z.enum(["high", "medium", "low"]),
+    }),
+  ),
+  consistency: z.object({
+    titleToOpening: z.string(),
+    openingToBody: z.string(),
+    bodyToCta: z.string(),
+  }),
+  claimsToVerify: z.array(
+    z.object({
+      claim: z.string(),
+      risk: z.string(),
+      safeWording: z.string(),
+    }),
+  ),
+  originality: z.string(),
+  abTests: z.array(
+    z.object({
+      variable: z.string(),
+      variantA: z.string(),
+      variantB: z.string(),
+      metric: z.string(),
+    }),
+  ),
+});
+
 /** LLM 解析用：允许脏 productionGuide，随后由 finalize 归一化 */
 export const scriptDraftOutputLooseSchema = z.object({
   pipeline: scriptDraftPipelineSchema,
@@ -515,6 +756,8 @@ export const scriptDraftOutputLooseSchema = z.object({
       ),
     })
     .optional(),
+  viralPlan: scriptViralPlanSchema.optional(),
+  scriptReview: scriptReviewSchema.optional(),
   plainText: z.string(),
 });
 
@@ -542,6 +785,16 @@ export const scriptDraftInputSchema = z.object({
   mustShoot: z.string().optional(),
   dayPlan: z.string().optional(),
   internalNote: z.string().optional(),
+  audience: z.string().optional(),
+  contentGoal: z
+    .enum(["lead_generation", "engagement", "education", "brand", "other"])
+    .optional(),
+  rewriteMode: scriptRewriteModeSchema.optional(),
+  ctaGoal: z.string().optional(),
+  claimEvidence: z.string().optional(),
+  researchSnapshotId: z.string().optional(),
+  selectedTopicCardId: z.string().optional(),
+  selectedResearchItemIds: z.array(z.string()).max(5).optional(),
 });
 
 export const scriptDraftOutputSchema = z.object({
@@ -569,6 +822,10 @@ export const scriptDraftOutputSchema = z.object({
   gapsOrWarnings: z.array(z.string()),
   /** 拍摄与剪辑指导；旧稿可缺省 */
   productionGuide: scriptProductionGuideSchema.optional(),
+  /** 联网依据与账号适配拆解；旧稿可缺省。 */
+  viralPlan: scriptViralPlanSchema.optional(),
+  /** 第二遍低温质检结果；旧稿可缺省。 */
+  scriptReview: scriptReviewSchema.optional(),
   plainText: z.string(),
 });
 
@@ -583,7 +840,10 @@ export type ScriptDraftProcessKind = z.infer<
 export type ScriptDraftStatus = z.infer<typeof scriptDraftStatusSchema>;
 export type ScriptDraftPipeline = z.infer<typeof scriptDraftPipelineSchema>;
 export type ScriptShootStatus = z.infer<typeof scriptShootStatusSchema>;
+export type ScriptRewriteMode = z.infer<typeof scriptRewriteModeSchema>;
 export type ScriptProductionGuide = z.infer<typeof scriptProductionGuideSchema>;
+export type ScriptViralPlan = z.infer<typeof scriptViralPlanSchema>;
+export type ScriptReview = z.infer<typeof scriptReviewSchema>;
 export type ScriptDraftInput = z.infer<typeof scriptDraftInputSchema>;
 export type ScriptDraftOutput = z.infer<typeof scriptDraftOutputSchema>;
 
@@ -605,6 +865,11 @@ export interface ScriptDraft {
   status: ScriptDraftStatus;
   provider: string | null;
   referenceVideoIds: string[];
+  /** 人工编辑稿；结构化 output 保留为不可变生成快照。 */
+  editedPlainText?: string | null;
+  /** 再生成的父稿，便于追踪 lineage。 */
+  parentScriptDraftId?: string | null;
+  promptVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }

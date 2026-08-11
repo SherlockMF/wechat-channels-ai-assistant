@@ -22,10 +22,41 @@ export async function POST(request: Request, context: Context) {
     return NextResponse.json({ error: "正在分析中，请稍后再试" }, { status: 409 });
   }
   try {
+    const targetVersionId = versionId || existing.viewingVersionId || undefined;
+    if (!targetVersionId) {
+      return NextResponse.json({ error: "审片版本不存在" }, { status: 404 });
+    }
+    if (process.env.SITES_DEPLOYMENT !== "true") {
+      await repository.updateDraftReviewVersion(
+        ownerId,
+        draftReviewId,
+        targetVersionId,
+        {
+          status: "uploaded",
+          progress: 0,
+          currentStep: "uploaded",
+          errorMessage: null,
+          completedAt: null,
+        },
+      );
+      const { enqueueDraftReviewAnalysis } = await import(
+        "@/lib/draft-review/queue-runtime"
+      );
+      await enqueueDraftReviewAnalysis({
+        ownerId,
+        draftReviewId,
+        versionId: targetVersionId,
+        sourceScriptDraftId: existing.draft.sourceScriptDraftId ?? null,
+      });
+      const queued = await repository.getDraftReview(ownerId, draftReviewId, {
+        versionId: targetVersionId,
+      });
+      return NextResponse.json({ draft: queued?.draft ?? existing.draft });
+    }
     const draft = await repository.processDraftReview(
       ownerId,
       draftReviewId,
-      versionId || existing.viewingVersionId || undefined,
+      targetVersionId,
     );
     return draft
       ? NextResponse.json({ draft })

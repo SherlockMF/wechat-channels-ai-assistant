@@ -29,6 +29,12 @@ const metricLabel: Record<string, string> = {
   follow_rate: "关注率",
 };
 const confidenceLabel: Record<string, string> = { low: "低", medium: "中", high: "高" };
+const performanceLabel: Record<string, string> = {
+  low: "偏低",
+  normal: "正常",
+  high: "偏高",
+};
+const severityLabel: Record<string, string> = { low: "低", medium: "中", high: "高" };
 const hookTypeLabel: Record<string, string> = {
   result: "结果型",
   pain_point: "痛点型",
@@ -41,6 +47,17 @@ const analysisModeLabel: Record<string, string> = {
   draft_mock: "发布前审片（Provider 占位）",
   draft_provider: "发布前审片（LLM Provider）",
   draft_dashscope: "发布前审片（阿里云百炼）",
+};
+const alignmentStatusLabel: Record<string, string> = {
+  matched: "已对齐",
+  partial: "部分对齐",
+  missing: "疑似缺失",
+  not_available: "证据不足",
+};
+const checklistStatusLabel: Record<string, string> = {
+  ready: "可发布",
+  fix: "先修改",
+  verify: "待人工确认",
 };
 
 
@@ -66,6 +83,7 @@ export function diagnosisToMarkdown(
 - 合理推断：${problem.inference}
 - 执行动作：${problem.recommendation}
 - 目标指标：${metricLabel[problem.expectedMetric] ?? problem.expectedMetric}
+- 严重程度：${severityLabel[problem.severity] ?? problem.severity}
 - 置信度：${confidenceLabel[problem.confidence] ?? problem.confidence}`,
     )
     .join("\n\n");
@@ -81,6 +99,45 @@ export function diagnosisToMarkdown(
         }
   - 原内容：${item.originalContent}
   - 问题：${item.problem}`,
+    )
+    .join("\n");
+  const observationText = (result.detailedObservations ?? [])
+    .map(
+      (item, index) =>
+        `### ${index + 1}. ${item.startSecond.toFixed(1)}–${item.endSecond.toFixed(1)} 秒：${item.issue}
+
+- 性质：${item.nature === "fact" ? "事实观察" : "证据推断"}
+- 优先级：${item.priority === "high" ? "高" : item.priority === "medium" ? "中" : "低"}
+- 证据：${item.evidence.join("；")}
+- 怎么改：${item.recommendation}
+- 替换示例：${item.replacementExample}
+- 目标指标：${metricLabel[item.expectedMetric] ?? item.expectedMetric}
+- 置信度：${confidenceLabel[item.confidence] ?? item.confidence}`,
+    )
+    .join("\n\n");
+  const alignment = result.scriptAlignment;
+  const alignmentText = alignment
+    ? ([
+        ["开头承诺", alignment.openingPromise],
+        ["核心信息", alignment.coreMessage],
+        ["证据素材", alignment.proofAssets],
+        ["结尾行动号召", alignment.cta],
+      ] as const)
+        .map(
+          ([label, item]) =>
+            `### ${label}（${alignmentStatusLabel[item.status] ?? item.status}）
+
+- 脚本预期：${item.expected}
+- 成片观察：${item.observed}
+- 建议：${item.recommendation}`,
+        )
+        .join("\n\n") +
+      `\n\n- 遗漏：${alignment.omissions.join("；") || "无"}\n- 偏离：${alignment.deviations.join("；") || "无"}`
+    : "- 未关联或未取得可用脚本快照。";
+  const checklistText = (result.publishChecklist ?? [])
+    .map(
+      (item) =>
+        `- **${checklistStatusLabel[item.status] ?? item.status}**｜${item.item}：${item.reason}`,
     )
     .join("\n");
 
@@ -99,7 +156,21 @@ ${result.executiveSummary}
 
 ## 数据事实
 
+- 表现判断：${performanceLabel[result.dataAssessment.performanceLevel] ?? result.dataAssessment.performanceLevel}
+- 样本置信度：${confidenceLabel[result.dataAssessment.sampleConfidence] ?? result.dataAssessment.sampleConfidence}
 ${result.dataAssessment.facts.map((fact) => `- ${fact}`).join("\n")}
+
+## 逐时码证据与修改意见
+
+${observationText || "- 当前结果未包含逐时码证据。"}
+
+## 脚本与成片对齐
+
+${alignmentText}
+
+## 发布前检查单
+
+${checklistText || "- 当前结果未包含发布检查单。"}
 
 ## ${result.primaryProblems.length} 个主要问题
 
@@ -149,7 +220,7 @@ ${(result.titleSuggestions ?? [])
 - 原内容概述：${result.copySuggestions.originalSummary}
 - 完整脚本方向：${result.copySuggestions.revisedFullScript}
 - 字幕版：${result.copySuggestions.subtitleVersion}
-- CTA：${result.copySuggestions.cta}
+- 行动号召：${result.copySuggestions.cta}
 - 音乐情绪：${result.audioSuggestions.musicMood}
 - 当前声音问题：${result.audioSuggestions.currentIssues.join("；") || "未发现明确问题"}
 - 开头声音动作：${result.audioSuggestions.openingAudioAction}

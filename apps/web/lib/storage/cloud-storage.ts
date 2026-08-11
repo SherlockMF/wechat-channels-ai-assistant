@@ -321,6 +321,7 @@ export async function saveDraftReviewVideo(
   goal: string | null,
   coverFile?: File | null,
   tags: string[] = [],
+  sourceScriptDraftId: string | null = null,
 ): Promise<DraftReview> {
   const id = createId();
   const versionId = createId();
@@ -341,6 +342,7 @@ export async function saveDraftReviewVideo(
     tags,
     currentVersionId: versionId,
     versionCount: 1,
+    sourceScriptDraftId: sourceScriptDraftId?.trim() || null,
     ...media,
     evidencePath: null,
     baselineImportId: null,

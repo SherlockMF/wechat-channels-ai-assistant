@@ -136,9 +136,21 @@ export function sanitizeGeneratedTitles(
     .map((title) => title.trim())
     .filter((title) => title && !looksLikeSpokenBody(title))
     .map((title) => shortHook(title, 28));
-  if (cleaned.length > 0) return cleaned.slice(0, 3);
-  const hook = shortHook(fallbackIdea, 28) || "实用短视频";
-  return [hook, `${hook}｜必看`, `谁懂｜${hook}`];
+  const normalizedIdea = fallbackIdea.replace(/\s+/gu, " ").trim();
+  const firstClause = normalizedIdea.split(/[，。！？；：|｜—]/u)[0]?.trim() ?? "";
+  const safeSeed =
+    firstClause && firstClause.length <= 16 ? firstClause : "这个居住问题";
+  const fallbacks = [
+    `先看结果｜${safeSeed}`,
+    `别再踩坑｜${safeSeed}`,
+    `真实案例｜${safeSeed}`,
+    "先看结果再做决定",
+    "装修前先避开这个坑",
+  ];
+  const unique = [...new Set([...cleaned, ...fallbacks])].filter(
+    (title) => title.length <= 28 && !looksLikeSpokenBody(title),
+  );
+  return unique.slice(0, 3);
 }
 
 export function preferScriptBody(

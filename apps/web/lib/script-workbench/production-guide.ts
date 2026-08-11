@@ -6,6 +6,9 @@ import type {
   ScriptDraftSmartSubTopic,
   ScriptDraftTopic,
   ScriptProductionGuide,
+  ViralResearchItem,
+  ViralResearchSnapshot,
+  ViralResearchTopicCard,
 } from "@video-diagnosis/shared-types";
 import { preferScriptBody } from "@/lib/script-workbench/display";
 import {
@@ -20,6 +23,10 @@ export interface ScriptGenerateRequest {
   processKinds: ScriptDraftProcessKind[];
   input: ScriptDraftInput;
   referenceHints?: string[];
+  /** 仓储按 owner + snapshot id 解析后的运行时研究上下文，不写回 ScriptDraftInput。 */
+  researchSnapshot?: ViralResearchSnapshot | null;
+  selectedResearchItems?: ViralResearchItem[];
+  selectedTopicCard?: ViralResearchTopicCard | null;
 }
 
 const DEFAULT_EDIT_GUIDANCE = [
@@ -35,7 +42,12 @@ const DEGRADED_WARNING =
 
 export function sanitizeScriptInput(input: ScriptDraftInput): ScriptDraftInput {
   const shootStatus = resolveShootStatus(input);
-  const next: ScriptDraftInput = { ...input, shootStatus };
+  const next: ScriptDraftInput = {
+    ...input,
+    shootStatus,
+    rewriteMode: input.rewriteMode ?? "polish",
+    selectedResearchItemIds: input.selectedResearchItemIds?.slice(0, 5),
+  };
   if (shootStatus !== "shot") {
     const { materialNotes: _drop, ...rest } = next;
     return rest;
@@ -170,7 +182,10 @@ export function finalizeScriptOutput(
     input: sanitizeScriptInput(request.input),
   };
   let next = output;
-  if (options?.preferExistingScript !== false) {
+  const preferExistingScript =
+    options?.preferExistingScript ??
+    sanitizedRequest.input.rewriteMode === "preserve";
+  if (preferExistingScript) {
     next = preferScriptBody(next, sanitizedRequest.input.existingScript);
   }
   const sections = guideSectionsFromOutput(next);

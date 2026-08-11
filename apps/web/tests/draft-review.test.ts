@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { diagnosisResultSchema } from "@video-diagnosis/shared-types";
 import { buildDraftDiagnosis } from "@/lib/draft-review/diagnosis";
-import type { DraftEvidenceManifest } from "@/lib/draft-review/evidence";
+import {
+  selectEvidenceFrameSeconds,
+  type DraftEvidenceManifest,
+} from "@/lib/draft-review/evidence";
+import { deduplicateAdjacentVisualFrames } from "@/lib/draft-review/visual-evidence";
+import { normalizeDiagnosisTimeline } from "@/lib/draft-review/dashscope-provider";
+import { parseTranscriptionSegments } from "@/lib/draft-review/speech-evidence";
 import {
   findSimilarVideosByTags,
   normalizeDraftTags,
@@ -20,6 +26,26 @@ const evidence: DraftEvidenceManifest = {
   title: "测试标题",
   goal: "引流咨询",
   tags: ["软水", "装修"],
+  audioPath: "speech.wav",
+  transcript: {
+    text: "装修前先确认软水机位置，现场要预留电源和排水。结尾评论区领取清单。",
+    provider: "test",
+    model: "test-asr",
+    language: "zh",
+    segments: [
+      { startSecond: 0, endSecond: 4, text: "装修前先确认软水机位置" },
+    ],
+  },
+  frames: [
+    {
+      second: 0,
+      imagePath: "frame-0.jpg",
+      description: "施工现场展示软水机预留位置",
+      ocrText: "装修前先确认",
+      duplicateOfSecond: null,
+    },
+  ],
+  limitations: [],
 };
 
 function makeRecord(
@@ -64,6 +90,9 @@ describe("buildDraftDiagnosis", () => {
     expect(result.primaryProblems).toHaveLength(3);
     expect(result.copyAndSubtitleReview.issues.length).toBeGreaterThan(0);
     expect(result.titleSuggestions.length).toBeGreaterThanOrEqual(2);
+    expect(result.detailedObservations?.length).toBeGreaterThanOrEqual(3);
+    expect(result.publishChecklist?.length).toBeGreaterThan(0);
+    expect(result.scriptAlignment?.openingPromise.status).toBe("not_available");
     expect(result.limitations.some((item) => item.includes("无账号基线"))).toBe(true);
     expect(() => diagnosisResultSchema.parse(result)).not.toThrow();
   });
@@ -89,6 +118,113 @@ describe("buildDraftDiagnosis", () => {
     expect(
       result.dataAssessment.facts.some((fact) => fact.includes("最相似历史条")),
     ).toBe(true);
+  });
+});
+
+describe("evidence sampling", () => {
+  it("加密覆盖前三秒并在之后每 5 秒取帧，最多 36 张", () => {
+    expect(selectEvidenceFrameSeconds(40)).toEqual([
+      0,
+      1,
+      2,
+      3,
+      5,
+      7,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+    ]);
+    expect(selectEvidenceFrameSeconds(2.5)).toEqual([0, 1, 2]);
+    expect(selectEvidenceFrameSeconds(10_000)).toHaveLength(36);
+  });
+
+  it("相邻画面描述和 OCR 高度相似时标记重复", () => {
+    const frames = deduplicateAdjacentVisualFrames([
+      {
+        second: 0,
+        imagePath: "0.jpg",
+        description: "施工现场展示软水机安装位置",
+        ocrText: "装修前先预留",
+        duplicateOfSecond: null,
+      },
+      {
+        second: 1,
+        imagePath: "1.jpg",
+        description: "施工现场展示软水机安装位置",
+        ocrText: "装修前先预留",
+        duplicateOfSecond: null,
+      },
+      {
+        second: 2,
+        imagePath: "2.jpg",
+        description: "镜头切到排水管特写",
+        ocrText: "排水要求",
+        duplicateOfSecond: null,
+      },
+    ]);
+    expect(frames[1]?.duplicateOfSecond).toBe(0);
+    expect(frames[2]?.duplicateOfSecond).toBeNull();
+  });
+});
+
+describe("provider timeline guard", () => {
+  it("裁剪模型越界秒点并过滤裁剪后无有效区间的项", () => {
+    const raw = structuredClone(buildDraftDiagnosis(evidence, null));
+    raw.primaryProblems[0]!.startSecond = -8;
+    raw.primaryProblems[0]!.endSecond = 999;
+    raw.primaryProblems[1]!.startSecond = 80;
+    raw.primaryProblems[1]!.endSecond = 90;
+    raw.editingPlan[0]!.startSecond = -2;
+    raw.editingPlan[0]!.endSecond = 99;
+    raw.editingPlan[0]!.sourceAsset = {
+      sourceStartSecond: 80,
+      sourceEndSecond: 99,
+    };
+    raw.revisedOpening[0]!.sourceAssetStartSecond = -5;
+    raw.revisedOpening[0]!.sourceAssetEndSecond = 100;
+    raw.detailedObservations![0]!.endSecond = 100;
+
+    const parsed = diagnosisResultSchema.parse(
+      normalizeDiagnosisTimeline(raw, 42),
+    );
+    expect(parsed.primaryProblems[0]).toMatchObject({
+      startSecond: 0,
+      endSecond: 42,
+    });
+    expect(parsed.primaryProblems).toHaveLength(2);
+    expect(parsed.editingPlan[0]).toMatchObject({
+      startSecond: 0,
+      endSecond: 42,
+    });
+    expect(parsed.editingPlan[0]?.sourceAsset).toBeUndefined();
+    expect(parsed.revisedOpening[0]).toMatchObject({
+      sourceAssetStartSecond: 0,
+      sourceAssetEndSecond: 42,
+    });
+    expect(parsed.detailedObservations?.[0]?.endSecond).toBe(42);
+  });
+});
+
+describe("speech evidence", () => {
+  it("解析 verbose_json 句级时间码并裁剪到媒体时长", () => {
+    expect(
+      parseTranscriptionSegments(
+        {
+          segments: [
+            { start: -1, end: 2.5, text: "开头" },
+            { start: 8, end: 15, text: "结尾" },
+            { start: 11, end: 12, text: "超出媒体" },
+          ],
+        },
+        10,
+      ),
+    ).toEqual([
+      { startSecond: 0, endSecond: 2.5, text: "开头" },
+      { startSecond: 8, endSecond: 10, text: "结尾" },
+    ]);
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { UploadCloud } from "lucide-react";
 import { Button, Card, Progress } from "@/components/ui";
 
@@ -12,17 +12,24 @@ function titleFromFilename(filename: string): string {
 
 export function DraftReviewUpload() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedScriptId = searchParams.get("scriptId")?.trim() ?? "";
   const [file, setFile] = useState<File | null>(null);
   const [cover, setCover] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [tags, setTags] = useState("");
+  const [sourceScriptDraftId, setSourceScriptDraftId] = useState("");
+  const [scriptOptions, setScriptOptions] = useState<
+    Array<{ id: string; title: string | null; ideaSummary: string; updatedAt: string }>
+  >([]);
   const [tagsSource, setTagsSource] = useState<"llm" | "heuristic" | "manual" | "">("");
   const [suggestingTags, setSuggestingTags] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const tagsAutoRef = useRef(true);
+  const sourceSelectionTouchedRef = useRef(false);
   const suggestSeqRef = useRef(0);
 
   async function suggestTags(forTitle: string) {
@@ -75,6 +82,30 @@ export function DraftReviewUpload() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- suggestTags 闭包稳定依赖 title
   }, [title]);
 
+  useEffect(() => {
+    void fetch("/api/scripts")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("脚本列表不可用");
+        return response.json();
+      })
+      .then((body: { items?: typeof scriptOptions }) => {
+        const items = [...(body.items ?? [])].sort((left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt),
+          );
+        setScriptOptions(items);
+        if (
+          requestedScriptId &&
+          !sourceSelectionTouchedRef.current &&
+          items.some((item) => item.id === requestedScriptId)
+        ) {
+          setSourceScriptDraftId(requestedScriptId);
+        }
+      })
+      .catch(() => {
+        // 关联脚本是可选增强，列表不可用不阻断独立视频审片。
+      });
+  }, [requestedScriptId]);
+
   async function submit() {
     if (!file) {
       setError("请先选择视频文件");
@@ -94,6 +125,9 @@ export function DraftReviewUpload() {
     if (resolvedTitle) formData.append("title", resolvedTitle);
     if (goal.trim()) formData.append("goal", goal.trim());
     if (tags.trim()) formData.append("tags", tags.trim());
+    if (sourceScriptDraftId) {
+      formData.append("sourceScriptDraftId", sourceScriptDraftId);
+    }
     try {
       const response = await fetch("/api/draft-reviews", {
         method: "POST",
@@ -101,7 +135,11 @@ export function DraftReviewUpload() {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "审片失败");
-      setStatus("分析完成，正在跳转…");
+      setStatus(
+        body.draft?.status === "completed"
+          ? "分析完成，正在跳转…"
+          : "已进入分析队列，正在跳转…",
+      );
       router.push(`/review/${body.draft.id}`);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "审片失败");
@@ -127,6 +165,31 @@ export function DraftReviewUpload() {
           />
           <span className="mt-1 block text-xs text-[#7a8680]">
             支持 MP4 / MOV / WebM，单条上传；标题默认取文件名，标签由大模型根据标题归纳（可改）
+          </span>
+        </label>
+
+        <label className="block">
+          <span className="mb-2 block text-sm font-bold text-[#52615a]">
+            来源脚本（选填）
+          </span>
+          <select
+            value={sourceScriptDraftId}
+            disabled={busy}
+            onChange={(event) => {
+              sourceSelectionTouchedRef.current = true;
+              setSourceScriptDraftId(event.target.value);
+            }}
+            className="block w-full rounded-xl border border-line bg-white px-4 py-3 text-sm"
+          >
+            <option value="">不关联脚本，仅按成片证据审片</option>
+            {scriptOptions.map((script) => (
+              <option key={script.id} value={script.id}>
+                {script.title || script.ideaSummary || "未命名脚本"} · {script.updatedAt.slice(0, 10)}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-[#7a8680]">
+            关联后会冻结当前脚本版本，用于核对开头承诺、核心信息、证据素材和行动号召；后续改稿不会覆盖本次依据。
           </span>
         </label>
 

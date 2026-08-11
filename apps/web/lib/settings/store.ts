@@ -6,6 +6,7 @@ import {
   userSettingsSchema,
   type UserSettings,
 } from "@/lib/settings/schema";
+import { normalizeUserSettingsProviders } from "@/lib/settings/web-research-config";
 
 export function settingsPath(): string {
   const fromEnv = process.env.USER_SETTINGS_PATH?.trim();
@@ -14,7 +15,11 @@ export function settingsPath(): string {
 }
 
 function parseSettingsJson(raw: string): UserSettings {
-  return userSettingsSchema.parse(JSON.parse(raw) as unknown);
+  const parsed = userSettingsSchema.parse(JSON.parse(raw) as unknown);
+  return {
+    ...parsed,
+    providers: normalizeUserSettingsProviders(parsed.providers),
+  };
 }
 
 export function loadUserSettingsSync(): UserSettings {
@@ -37,7 +42,10 @@ export async function loadUserSettings(): Promise<UserSettings> {
 export async function saveUserSettings(
   next: UserSettings,
 ): Promise<UserSettings> {
-  const parsed = userSettingsSchema.parse(next);
+  const parsed = userSettingsSchema.parse({
+    ...next,
+    providers: normalizeUserSettingsProviders(next.providers),
+  });
   const filePath = settingsPath();
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
@@ -69,6 +77,10 @@ export function maskUserSettings(settings: UserSettings): UserSettings {
         ...settings.providers.llm,
         apiKey: maskSecret(settings.providers.llm.apiKey),
       },
+      webResearch: {
+        ...settings.providers.webResearch,
+        apiKey: maskSecret(settings.providers.webResearch.apiKey),
+      },
     },
   };
 }
@@ -88,7 +100,7 @@ export function mergeProviderUpdate(
   return userSettingsSchema.parse({
     setupCompleted: patch.setupCompleted,
     dismissWizard: patch.dismissWizard,
-    providers: {
+    providers: normalizeUserSettingsProviders({
       dashscopeApiKey: keepKey(
         patch.providers.dashscopeApiKey,
         current.providers.dashscopeApiKey,
@@ -117,6 +129,13 @@ export function mergeProviderUpdate(
           current.providers.llm.apiKey,
         ),
       },
-    },
+      webResearch: {
+        ...patch.providers.webResearch,
+        apiKey: keepKey(
+          patch.providers.webResearch.apiKey,
+          current.providers.webResearch.apiKey,
+        ),
+      },
+    }),
   });
 }

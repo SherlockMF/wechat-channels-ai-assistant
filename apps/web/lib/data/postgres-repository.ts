@@ -153,6 +153,14 @@ function analysisJob(row: DatabaseRow): AnalysisJob {
 }
 
 export class PostgresRepository {
+  async listOwnerVideoRecords(ownerId: string): Promise<ImportedVideoRecord[]> {
+    const result = await this.pool.query(
+      "SELECT * FROM video_records WHERE owner_id=$1 ORDER BY published_at DESC",
+      [ownerId],
+    );
+    return result.rows.map(videoRecord);
+  }
+
   private readonly pool: Pool;
   private readonly db: ReturnType<typeof drizzle>;
 

@@ -22,6 +22,21 @@ export async function GET(request: Request, context: Context) {
   if (!payload) {
     return NextResponse.json({ error: "审片记录不存在" }, { status: 404 });
   }
+  if (
+    process.env.SITES_DEPLOYMENT !== "true" &&
+    payload.viewingVersionId &&
+    (payload.draft.status === "uploaded" || payload.draft.status === "processing")
+  ) {
+    const { enqueueDraftReviewAnalysis } = await import(
+      "@/lib/draft-review/queue-runtime"
+    );
+    await enqueueDraftReviewAnalysis({
+      ownerId,
+      draftReviewId,
+      versionId: payload.viewingVersionId,
+      sourceScriptDraftId: payload.draft.sourceScriptDraftId ?? null,
+    });
+  }
   const expires = Date.now() + 15 * 60_000;
   const versionQuery = payload.viewingVersionId
     ? `&version=${encodeURIComponent(payload.viewingVersionId)}`

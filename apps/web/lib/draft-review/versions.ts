@@ -35,6 +35,7 @@ export function versionFromDraftFields(
     errorMessage: draft.errorMessage,
     createdAt: draft.createdAt,
     completedAt: draft.completedAt,
+    scriptSnapshot: null,
   };
 }
 
@@ -75,6 +76,10 @@ export function migrateDraftReviewVersions(state: {
   let changed = false;
 
   for (const draft of state.draftReviews) {
+    if (draft.sourceScriptDraftId === undefined) {
+      draft.sourceScriptDraftId = null;
+      changed = true;
+    }
     if (draft.currentVersionId == null) {
       draft.currentVersionId = null;
       changed = true;
@@ -114,6 +119,13 @@ export function migrateDraftReviewVersions(state: {
         draft.versionCount = sorted.length;
         changed = true;
       }
+    }
+  }
+
+  for (const version of state.draftReviewVersions) {
+    if (version.scriptSnapshot === undefined) {
+      version.scriptSnapshot = null;
+      changed = true;
     }
   }
 

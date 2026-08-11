@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { loadUserSettings } from "@/lib/settings/store";
 import type { HealthCheck } from "@/lib/settings/types";
+import { describeWebResearchConfig, webResearchConfigIssues } from "@/lib/settings/web-research-config";
 
 export type { HealthCheck } from "@/lib/settings/types";
 
@@ -175,9 +176,12 @@ async function checkApiConfigured(): Promise<HealthCheck> {
     settings.providers.dashscopeApiKey.trim() ||
     settings.providers.vision.apiKey.trim() ||
     settings.providers.llm.apiKey.trim() ||
+    settings.providers.speech.apiKey.trim() ||
+    settings.providers.webResearch.apiKey.trim() ||
     process.env.DASHSCOPE_API_KEY?.trim() ||
     process.env.VISION_API_KEY?.trim() ||
     process.env.LLM_API_KEY?.trim() ||
+    process.env.SPEECH_API_KEY?.trim() ||
     "";
   if (key) {
     return {
@@ -195,14 +199,38 @@ async function checkApiConfigured(): Promise<HealthCheck> {
   };
 }
 
+async function checkWebResearch(): Promise<HealthCheck> {
+  const settings = await loadUserSettings();
+  if (!settings.providers.webResearch.enabled) {
+    return {
+      id: "webResearch",
+      label: "联网爆款研究",
+      ok: true,
+      message: "未启用联网爆款研究",
+    };
+  }
+  const issues = webResearchConfigIssues(settings);
+  return {
+    id: "webResearch",
+    label: "联网爆款研究",
+    ok: issues.length === 0,
+    message:
+      issues.length > 0
+        ? issues.join("；")
+        : describeWebResearchConfig(settings),
+  };
+}
+
 export async function runHealthChecks(): Promise<HealthCheck[]> {
-  const [postgres, worker, ffmpeg, ffprobe, storage, api] = await Promise.all([
+  const [postgres, worker, ffmpeg, ffprobe, storage, api, webResearch] =
+    await Promise.all([
     checkPostgres(),
     checkWorker(),
     checkCommand("ffmpeg"),
     checkCommand("ffprobe"),
     checkStorage(),
     checkApiConfigured(),
+    checkWebResearch(),
   ]);
   return [
     {
@@ -219,5 +247,6 @@ export async function runHealthChecks(): Promise<HealthCheck[]> {
     ffprobe,
     storage,
     api,
+    webResearch,
   ];
 }
