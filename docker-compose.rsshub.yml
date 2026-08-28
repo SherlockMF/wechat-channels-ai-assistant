@@ -1,0 +1,59 @@
+# 「研究热点」的可选依赖：自建 RSSHub，把没有官方 RSS 的站点与热搜榜转成 RSS。
+# 官方 RSS 源不需要它；只有微博热搜、知乎热榜、抖音热搜这类路由才需要。
+#
+# 启动：docker compose -f docker-compose.rsshub.yml up -d
+# 停止：docker compose -f docker-compose.rsshub.yml down
+# 启动后在「设置 → 研究热点」把 RSSHub 地址填 http://127.0.0.1:1200
+#
+# 与主 docker-compose.yml 相互独立，可单独启停。
+
+services:
+  rsshub:
+    image: diygod/rsshub
+    restart: unless-stopped
+    ports:
+      - "1200:1200"
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: redis
+      REDIS_URL: redis://redis:6379/
+      # 热搜类路由依赖浏览器渲染，缺少它时这些源会失败但不影响其他源。
+      PUPPETEER_WS_ENDPOINT: ws://browserless:3000
+      # 热点抓取每天只跑几次，缓存久一点可显著降低被限流的概率。
+      CACHE_EXPIRE: ${RSSHUB_CACHE_EXPIRE:-1800}
+      REQUEST_TIMEOUT: ${RSSHUB_REQUEST_TIMEOUT:-15000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1200/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - redis
+      - browserless
+
+  browserless:
+    image: browserless/chrome
+    restart: unless-stopped
+    ulimits:
+      core:
+        hard: 0
+        soft: 0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/pressure"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - rsshub_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  rsshub_redis_data:

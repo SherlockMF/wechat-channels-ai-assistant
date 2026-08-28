@@ -3,6 +3,7 @@ import type {
   ScriptReview,
   ScriptViralPlan,
 } from "@video-diagnosis/shared-types";
+import { snapshotHasWebSearch } from "@/lib/viral-research/query";
 import type { ScriptGenerateRequest } from "@/lib/script-workbench/production-guide";
 
 const HOOK_MECHANISMS: ScriptViralPlan["hookMechanisms"][number]["mechanism"][] = [
@@ -24,13 +25,14 @@ export function resolveResearchStatus(
   }
   const expiresAt = Date.parse(snapshot.expiresAt);
   const fresh = Number.isFinite(expiresAt) && expiresAt > Date.now();
-  const hasExternalEvidence = (request.selectedResearchItems ?? []).some(
+  const hasWebExternalEvidence = (request.selectedResearchItems ?? []).some(
     (item) =>
-      item.sourceType !== "owned_history" &&
+      item.sourceType === "dashscope" &&
       (item.evidenceLevel === "public_source" ||
-        item.evidenceLevel === "verified_metric"),
+        item.evidenceLevel === "platform_page" ||
+        item.evidenceLevel === "media_article"),
   );
-  return snapshot.searchPerformed && fresh && hasExternalEvidence
+  return snapshotHasWebSearch(snapshot) && fresh && hasWebExternalEvidence
     ? "verified"
     : "unverified";
 }

@@ -1,4 +1,7 @@
 import type {
+  HotspotItem,
+  HotspotSnapshot,
+  HotspotTopicCard,
   ScriptDraftFormat,
   ScriptDraftInput,
   ScriptDraftOutput,
@@ -27,6 +30,10 @@ export interface ScriptGenerateRequest {
   researchSnapshot?: ViralResearchSnapshot | null;
   selectedResearchItems?: ViralResearchItem[];
   selectedTopicCard?: ViralResearchTopicCard | null;
+  /** 热点工作台带入的运行时上下文，同样按 owner + snapshot id 解析。 */
+  hotspotSnapshot?: HotspotSnapshot | null;
+  hotspotTopicCard?: HotspotTopicCard | null;
+  hotspotItems?: HotspotItem[];
 }
 
 const DEFAULT_EDIT_GUIDANCE = [

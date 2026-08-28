@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>装修施工观察</title>
+  <updated>2026-08-27T12:00:00Z</updated>
+  <entry>
+    <title>新版住宅水电施工验收规范开始执行</title>
+    <link rel="alternate" href="https://atom.example.com/posts/101"/>
+    <link rel="edit" href="https://atom.example.com/edit/101"/>
+    <published>2026-08-27T09:15:00Z</published>
+    <summary>强弱电分槽、隐蔽工程留档与验收流程都有调整。</summary>
+  </entry>
+  <entry>
+    <title>全屋智能中控屏新品实测：场景联动更快</title>
+    <link href="https://atom.example.com/posts/102"/>
+    <published>2026-08-27T11:00:00Z</published>
+    <content type="html">&lt;p&gt;实测智能灯光与智能门锁的联动延迟。&lt;/p&gt;</content>
+  </entry>
+</feed>

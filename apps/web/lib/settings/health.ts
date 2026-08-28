@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { access, constants, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { describeHotspotConfig, hotspotConfigIssues } from "@/lib/settings/hotspot-config";
 import { loadUserSettings } from "@/lib/settings/store";
 import type { HealthCheck } from "@/lib/settings/types";
 import { describeWebResearchConfig, webResearchConfigIssues } from "@/lib/settings/web-research-config";
@@ -221,8 +222,29 @@ async function checkWebResearch(): Promise<HealthCheck> {
   };
 }
 
+/** 只做配置体检：RSS 源探测慢且容易触发限流，不在体检里发网络请求。 */
+async function checkHotspots(): Promise<HealthCheck> {
+  const settings = await loadUserSettings();
+  if (!settings.providers.hotspots.enabled) {
+    return {
+      id: "hotspots",
+      label: "热点研究",
+      ok: true,
+      message: "未启用热点研究",
+    };
+  }
+  const issues = hotspotConfigIssues(settings);
+  return {
+    id: "hotspots",
+    label: "热点研究",
+    ok: issues.length === 0,
+    message:
+      issues.length > 0 ? issues.join("；") : describeHotspotConfig(settings),
+  };
+}
+
 export async function runHealthChecks(): Promise<HealthCheck[]> {
-  const [postgres, worker, ffmpeg, ffprobe, storage, api, webResearch] =
+  const [postgres, worker, ffmpeg, ffprobe, storage, api, webResearch, hotspots] =
     await Promise.all([
     checkPostgres(),
     checkWorker(),
@@ -231,6 +253,7 @@ export async function runHealthChecks(): Promise<HealthCheck[]> {
     checkStorage(),
     checkApiConfigured(),
     checkWebResearch(),
+    checkHotspots(),
   ]);
   return [
     {
@@ -248,5 +271,6 @@ export async function runHealthChecks(): Promise<HealthCheck[]> {
     storage,
     api,
     webResearch,
+    hotspots,
   ];
 }

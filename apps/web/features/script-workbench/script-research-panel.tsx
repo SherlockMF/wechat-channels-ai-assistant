@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Sparkles, X } from "lucide-react";
@@ -11,7 +11,8 @@ import type {
 } from "@video-diagnosis/shared-types";
 import { viralResearchSnapshotSchema } from "@video-diagnosis/shared-types";
 import { Badge, Button } from "@/components/ui";
-import { buildResearchQuery, snapshotHasExternalItems } from "@/lib/viral-research/query";
+import { buildResearchQuery, researchEvidenceBadgeLabel, snapshotHasExternalItems } from "@/lib/viral-research/query";
+import { ViralSampleForm } from "@/features/viral-research/viral-sample-form";
 
 const VISIBLE_METRIC_LABELS: Record<string, string> = {
   views: "播放",
@@ -23,8 +24,9 @@ const VISIBLE_METRIC_LABELS: Record<string, string> = {
 };
 
 const RESEARCH_SOURCE_LABELS: Record<string, string> = {
-  dashscope: "DashScope 联网来源",
+  dashscope: "公开网页来源",
   owned_history: "账号历史",
+  viral_sample: "人工录入样本",
 };
 
 const PRODUCTION_COST_LABELS = {
@@ -32,6 +34,15 @@ const PRODUCTION_COST_LABELS = {
   medium: "中等成本",
   high: "高成本",
 } as const;
+
+const EVIDENCE_STRENGTH_LABELS = {
+  platform_sourced: "平台内容支撑",
+  media_sourced: "行业资料支撑",
+  weak: "证据较弱",
+} as const;
+
+const SEARCH_STEP_MESSAGE = "正在检索公开来源…";
+const ANALYZE_STEP_MESSAGE = "正在整理选题角度…";
 
 function ResearchEvidenceCard({
   item,
@@ -161,8 +172,8 @@ export function ScriptResearchPanel({
   onDraftUpdated?: (draft: ScriptDraft) => void;
 }) {
   const router = useRouter();
-  const autoStarted = useRef(false);
   const [research, setResearch] = useState<ViralResearchSnapshot | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [selectedTopicCardId, setSelectedTopicCardId] = useState("");
   const [selectedResearchItemIds, setSelectedResearchItemIds] = useState<string[]>([]);
   const [researchBusy, setResearchBusy] = useState(false);
@@ -236,14 +247,16 @@ export function ScriptResearchPanel({
   }
 
   async function runFreshResearch(forceRefresh: boolean) {
-    setLoadingMessage(
-      forceRefresh
-        ? "正在重新检索公开来源…"
-        : "正在检索公开来源并与账号历史信号交叉整理…",
+    setLoadingMessage(SEARCH_STEP_MESSAGE);
+    // 后端是单次请求，前端按耗时切换到第二步提示。
+    const analyzeTimer = setTimeout(
+      () => setLoadingMessage(ANALYZE_STEP_MESSAGE),
+      8_000,
     );
-    const response = await fetch("/api/viral-research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    try {
+      const response = await fetch("/api/viral-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: buildResearchQuery({
             topic: draft.topic,
@@ -252,54 +265,24 @@ export function ScriptResearchPanel({
           }),
           forceRefresh,
         }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      throw new Error(body.error || `研究失败（${response.status}）`);
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || `研究失败（${response.status}）`);
+      }
+      const parsed = viralResearchSnapshotSchema.safeParse(body.snapshot ?? body);
+      if (!parsed.success) throw new Error("研究结果格式无效，请重新研究");
+      await rememberSnapshot(parsed.data);
+    } finally {
+      clearTimeout(analyzeTimer);
     }
-    const parsed = viralResearchSnapshotSchema.safeParse(body.snapshot ?? body);
-    if (!parsed.success) throw new Error("研究结果格式无效，请刷新重试");
-    await rememberSnapshot(parsed.data);
   }
 
   async function loadResearch(forceRefresh = false) {
     setResearchBusy(true);
     setResearchError("");
     try {
-      if (forceRefresh) {
-        await runFreshResearch(true);
-        return;
-      }
-      const cachedSnapshotId =
-        draft.input.researchSnapshotId ?? readPanelStorage(draft.id)?.snapshotId;
-      if (cachedSnapshotId) {
-        setLoadingMessage("正在加载上次研究结果…");
-        const cached = await fetchSnapshotById(cachedSnapshotId);
-        if (cached && snapshotHasExternalItems(cached)) {
-          const selections = resolveInitialSelections(
-            draft,
-            cached,
-            readPanelStorage(draft.id) ?? {
-              selectedTopicCardId: draft.input.selectedTopicCardId,
-              selectedResearchItemIds: draft.input.selectedResearchItemIds,
-            },
-          );
-          applySnapshot(cached, selections);
-          await persistResearchToDraft(cached, selections);
-          return;
-        }
-        if (cached) {
-          setResearchError(
-            [
-              cached.degradedReason,
-              "上次外部联网未返回可用视频页面，正在重新检索…",
-            ]
-              .filter(Boolean)
-              .join(" "),
-          );
-        }
-      }
-      await runFreshResearch(false);
+      await runFreshResearch(forceRefresh);
     } catch (loadError) {
       setResearchError(
         loadError instanceof Error ? loadError.message : "研究失败，请重试",
@@ -310,11 +293,32 @@ export function ScriptResearchPanel({
     }
   }
 
+  /** 只读取已有快照，不会自动发起联网检索。 */
   useEffect(() => {
-    if (!visible || autoStarted.current) return;
-    autoStarted.current = true;
-    void loadResearch(false);
-  }, [visible, draft.id]);
+    if (!visible || hydrated) return;
+    setHydrated(true);
+    const snapshotId =
+      draft.input.researchSnapshotId ?? readPanelStorage(draft.id)?.snapshotId;
+    if (!snapshotId) return;
+    let cancelled = false;
+    void (async () => {
+      const cached = await fetchSnapshotById(snapshotId);
+      if (cancelled || !cached || !snapshotHasExternalItems(cached)) return;
+      const selections = resolveInitialSelections(
+        draft,
+        cached,
+        readPanelStorage(draft.id) ?? {
+          selectedTopicCardId: draft.input.selectedTopicCardId,
+          selectedResearchItemIds: draft.input.selectedResearchItemIds,
+        },
+      );
+      applySnapshot(cached, selections);
+      await persistResearchToDraft(cached, selections);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, hydrated, draft.id]);
 
   useEffect(() => {
     if (!research) return;
@@ -327,33 +331,32 @@ export function ScriptResearchPanel({
 
   const researchEvidenceGroups = useMemo(() => {
     if (!research) return [];
+    const external = research.items.filter(
+      (item) => item.sourceType !== "owned_history",
+    );
+    // 旧快照里的 verified_metric 是人工确认过的平台样本，仍归到平台内容组。
+    const isPlatform = (item: ViralResearchItem) =>
+      item.evidenceLevel === "platform_page" ||
+      item.evidenceLevel === "verified_metric";
     return [
       {
-        key: "verified",
-        title: "带公开指标的外部内容",
-        items: research.items.filter(
-          (item) =>
-            item.sourceType !== "owned_history" &&
-            item.evidenceLevel === "verified_metric",
-        ),
+        key: "platform",
+        title: "平台内容",
+        items: external.filter(isPlatform),
       },
       {
-        key: "topic",
-        title: "外部主题资料",
-        items: research.items.filter(
-          (item) =>
-            item.sourceType !== "owned_history" &&
-            item.evidenceLevel !== "verified_metric",
-        ),
+        key: "media",
+        title: "行业资料",
+        items: external.filter((item) => !isPlatform(item)),
       },
       {
         key: "history",
-        title: "本账号历史实绩",
+        title: "本账号历史",
         items: research.items.filter(
           (item) => item.sourceType === "owned_history",
         ),
       },
-    ];
+    ].filter((group) => group.items.length > 0);
   }, [research]);
 
   function selectTopicCard(id: string, sourceIds: string[]) {
@@ -476,40 +479,52 @@ export function ScriptResearchPanel({
           </div>
         ) : null}
 
+        {!research && !researchBusy ? (
+          <div className="space-y-2 rounded-xl border border-line bg-fog p-4 text-sm text-[#52615a]">
+            <p className="font-semibold text-ink">还没有研究结果</p>
+            <p className="text-xs leading-5">
+              点「开始研究」联网检索与本主题相关的公开来源，整理成可点开核对的选题参考。整个过程大约需要半分钟。
+            </p>
+          </div>
+        ) : null}
+
         {research && !researchBusy && snapshotHasExternalItems(research) ? (
           <p className="text-xs text-[#7a8680]">
-            已恢复上次研究结果；如需重新检索请点击「刷新研究」。
+            已展示上次研究结果；需要最新内容请点「刷新研究」。
           </p>
         ) : null}
 
         {research && !snapshotHasExternalItems(research) ? (
           <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
-            <p className="font-semibold">外部短视频检索未成功</p>
+            <p className="font-semibold">这次没检索到可用的公开来源</p>
             <p>
-              当前只有本账号历史参考（{research.provider}），DashScope
-              联网没有返回可用的抖音/小红书/B站/快手/视频号页面。
+              可以换个更具体的主题词再试一次；如果一直没有结果，多半是联网研究的配置或额度有问题。
             </p>
-            {research.degradedReason ? (
-              <p>原因：{research.degradedReason}</p>
-            ) : null}
-            {research.limitations.length ? (
-              <ul className="list-disc space-y-1 pl-4">
-                {research.limitations.slice(0, 4).map((item, index) => (
-                  <li key={`${item}-${index}`}>{item}</li>
-                ))}
-              </ul>
-            ) : null}
-            <p>
-              请先到
-              <Link href="/settings" className="mx-1 font-semibold text-pine hover:underline">
-                设置 → 联网爆款研究
-              </Link>
-              确认已启用、Research Key 有效，且 Native API Base URL 为
-              <code className="mx-1 rounded bg-white px-1">
-                https://dashscope.aliyuncs.com/api/v1
-              </code>
-              （不要用 compatible-mode 地址）。然后点「刷新研究」重试。
-            </p>
+            <details>
+              <summary className="cursor-pointer font-semibold">
+                查看技术细节与设置引导
+              </summary>
+              <div className="mt-2 space-y-2">
+                {research.degradedReason ? (
+                  <p>原因：{research.degradedReason}</p>
+                ) : null}
+                <p>当前来源渠道：{research.provider}</p>
+                <p>
+                  请到
+                  <Link
+                    href="/settings"
+                    className="mx-1 font-semibold text-pine hover:underline"
+                  >
+                    设置 → 联网爆款研究
+                  </Link>
+                  确认已启用、Research Key 有效，且 Native API Base URL 为
+                  <code className="mx-1 rounded bg-white px-1">
+                    https://dashscope.aliyuncs.com/api/v1
+                  </code>
+                  （不要用 compatible-mode 地址）。
+                </p>
+              </div>
+            </details>
           </div>
         ) : null}
 
@@ -522,10 +537,17 @@ export function ScriptResearchPanel({
         {research ? (
           <>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge tone={research.searchPerformed ? "success" : "warning"}>
-                {research.searchPerformed ? "已执行外部检索" : "未完成外部检索"}
+              {(() => {
+                const badge = researchEvidenceBadgeLabel(research);
+                return (
+                  <Badge tone={badge.tone}>
+                    {badge.label}
+                  </Badge>
+                );
+              })()}
+              <Badge tone="neutral">
+                {research.items.length} 条可点开的来源
               </Badge>
-              <Badge tone="neutral">{research.provider}</Badge>
             </div>
 
             {research.topicCards.length ? (
@@ -545,7 +567,20 @@ export function ScriptResearchPanel({
                         }`}
                         onClick={() => selectTopicCard(card.id, card.sourceIds)}
                       >
-                        <span className="text-sm font-bold">{card.title}</span>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold">{card.title}</span>
+                          <Badge
+                            tone={
+                              card.evidenceStrength === "platform_sourced"
+                                ? "success"
+                                : card.evidenceStrength === "media_sourced"
+                                  ? "neutral"
+                                  : "warning"
+                            }
+                          >
+                            {EVIDENCE_STRENGTH_LABELS[card.evidenceStrength]}
+                          </Badge>
+                        </span>
                         <span className="mt-1 block text-xs text-[#52615a]">
                           {card.originalAngle}
                         </span>
@@ -575,37 +610,39 @@ export function ScriptResearchPanel({
                 <section key={group.key} className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-semibold text-ink">{group.title}</h3>
-                    <Badge tone={group.items.length ? "neutral" : "warning"}>
-                      {group.items.length} 条
-                    </Badge>
+                    <Badge tone="neutral">{group.items.length} 条</Badge>
                   </div>
-                  {group.items.length ? (
-                    <div className="space-y-2">
-                      {group.items.map((item) => (
-                        <ResearchEvidenceCard
-                          key={item.id}
-                          item={item}
-                          active={selectedResearchItemIds.includes(item.id)}
-                          onToggle={() => toggleResearchItem(item.id)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rounded-lg bg-fog px-3 py-2 text-xs text-[#66736c]">
-                      本次没有这一等级的研究结果。
-                    </p>
-                  )}
+                  <div className="space-y-2">
+                    {group.items.map((item) => (
+                      <ResearchEvidenceCard
+                        key={item.id}
+                        item={item}
+                        active={selectedResearchItemIds.includes(item.id)}
+                        onToggle={() => toggleResearchItem(item.id)}
+                      />
+                    ))}
+                  </div>
                 </section>
               ))}
             </div>
 
             {research.limitations.length || research.degradedReason ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-                研究局限：
-                {[
-                  ...research.limitations,
-                  ...(research.degradedReason ? [research.degradedReason] : []),
-                ].join("；")}
+              <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                {research.limitations.length ? (
+                  <ul className="list-disc space-y-1 pl-4">
+                    {research.limitations.slice(0, 2).map((item, index) => (
+                      <li key={`${item}-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {research.degradedReason ? (
+                  <details>
+                    <summary className="cursor-pointer font-semibold">
+                      查看技术细节
+                    </summary>
+                    <p className="mt-1">{research.degradedReason}</p>
+                  </details>
+                ) : null}
               </div>
             ) : null}
           </>
@@ -614,17 +651,23 @@ export function ScriptResearchPanel({
         {generateError ? (
           <p className="text-sm font-medium text-coral">{generateError}</p>
         ) : null}
+
+        <ViralSampleForm />
       </div>
 
       <div className="flex flex-wrap gap-2 border-t border-line px-4 py-3">
         <Button
           type="button"
           size="sm"
-          variant="secondary"
+          variant={research ? "secondary" : "primary"}
           disabled={researchBusy}
-          onClick={() => void loadResearch(true)}
+          onClick={() => void loadResearch(Boolean(research))}
         >
-          {researchBusy ? "刷新中…" : "刷新研究"}
+          {researchBusy
+            ? loadingMessage || "研究中…"
+            : research
+              ? "刷新研究"
+              : "开始研究"}
         </Button>
         <Button
           type="button"

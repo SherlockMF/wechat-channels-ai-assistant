@@ -1,0 +1,28 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "家电新品日报",
+  "home_page_url": "https://jsonfeed.example.com/",
+  "items": [
+    {
+      "id": "201",
+      "url": "https://jsonfeed.example.com/items/201",
+      "title": "洗碗机与热水器新品集中发布",
+      "date_published": "2026-08-27T06:00:00Z",
+      "summary": "多个品牌同日发布家电新品，覆盖洗碗机、热水器与新风。"
+    },
+    {
+      "id": "202",
+      "url": "https://jsonfeed.example.com/items/202",
+      "title": "家庭影院投影新品实测",
+      "date_published": "2026-08-25T06:00:00Z",
+      "content_text": "投影与电视的对比，以及家庭影院布线要点。"
+    },
+    {
+      "id": "203",
+      "url": "https://jsonfeed.example.com/items/203",
+      "title": "本周股市收评",
+      "date_published": "2026-08-26T06:00:00Z",
+      "summary": "与本账号赛道无关的财经内容。"
+    }
+  ]
+}

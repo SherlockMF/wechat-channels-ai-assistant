@@ -1,12 +1,23 @@
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeHotspotBlock } from "@/lib/settings/hotspot-config";
 import {
   defaultUserSettings,
   userSettingsSchema,
   type UserSettings,
 } from "@/lib/settings/schema";
 import { normalizeUserSettingsProviders } from "@/lib/settings/web-research-config";
+
+function normalizeProviders(
+  providers: UserSettings["providers"],
+): UserSettings["providers"] {
+  const normalized = normalizeUserSettingsProviders(providers);
+  return {
+    ...normalized,
+    hotspots: normalizeHotspotBlock(normalized.hotspots),
+  };
+}
 
 export function settingsPath(): string {
   const fromEnv = process.env.USER_SETTINGS_PATH?.trim();
@@ -18,7 +29,7 @@ function parseSettingsJson(raw: string): UserSettings {
   const parsed = userSettingsSchema.parse(JSON.parse(raw) as unknown);
   return {
     ...parsed,
-    providers: normalizeUserSettingsProviders(parsed.providers),
+    providers: normalizeProviders(parsed.providers),
   };
 }
 
@@ -44,7 +55,7 @@ export async function saveUserSettings(
 ): Promise<UserSettings> {
   const parsed = userSettingsSchema.parse({
     ...next,
-    providers: normalizeUserSettingsProviders(next.providers),
+    providers: normalizeProviders(next.providers),
   });
   const filePath = settingsPath();
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -100,7 +111,7 @@ export function mergeProviderUpdate(
   return userSettingsSchema.parse({
     setupCompleted: patch.setupCompleted,
     dismissWizard: patch.dismissWizard,
-    providers: normalizeUserSettingsProviders({
+    providers: normalizeProviders({
       dashscopeApiKey: keepKey(
         patch.providers.dashscopeApiKey,
         current.providers.dashscopeApiKey,
@@ -136,6 +147,8 @@ export function mergeProviderUpdate(
           current.providers.webResearch.apiKey,
         ),
       },
+      /** 热点块没有密钥字段，源清单按整体替换语义直接采用请求值。 */
+      hotspots: patch.providers.hotspots,
     }),
   });
 }

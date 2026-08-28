@@ -60,6 +60,7 @@ export interface AppState {
   draftResults: DraftReviewResult[];
   draftCoverBriefs: DraftCoverBrief[];
   scriptDrafts: ScriptDraft[];
+  viralSamples: import("@video-diagnosis/shared-types").ViralSample[];
 }
 
 export const emptyState = (): AppState => ({
@@ -74,4 +75,5 @@ export const emptyState = (): AppState => ({
   draftResults: [],
   draftCoverBriefs: [],
   scriptDrafts: [],
+  viralSamples: [],
 });

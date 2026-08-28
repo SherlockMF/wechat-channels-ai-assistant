@@ -471,8 +471,24 @@ export interface DraftCoverBrief {
   completedAt: string | null;
 }
 
+/** 内容赛道；热点过滤与研究检索共用同一份定义。 */
+export const trackIdSchema = z.enum([
+  "smart_home",
+  "water",
+  "decoration",
+  "appliance",
+]);
+
+export type TrackId = z.infer<typeof trackIdSchema>;
+
+/**
+ * 联网检索只能证明来源可被公开访问，拿不到互动指标；
+ * verified_metric 仅用于人工录入的爆款样本。
+ */
 export const viralResearchEvidenceLevelSchema = z.enum([
   "verified_metric",
+  "platform_page",
+  "media_article",
   "public_source",
   "account_history",
 ]);
@@ -480,7 +496,12 @@ export const viralResearchEvidenceLevelSchema = z.enum([
 export const viralResearchItemSchema = z.object({
   id: z.string(),
   // "douyin" retained only so older research snapshots still parse.
-  sourceType: z.enum(["dashscope", "douyin", "owned_history"]),
+  sourceType: z.enum([
+    "dashscope",
+    "douyin",
+    "owned_history",
+    "viral_sample",
+  ]),
   title: z.string(),
   url: z.string().url().optional(),
   site: z.string().optional(),
@@ -519,6 +540,10 @@ export const viralResearchTopicCardSchema = z.object({
   requiredEvidence: z.array(z.string()),
   productionCost: z.enum(["low", "medium", "high"]),
   risks: z.array(z.string()),
+  /** 支撑来源的最强等级；旧快照缺省按 weak 处理。 */
+  evidenceStrength: z
+    .enum(["platform_sourced", "media_sourced", "weak"])
+    .default("weak"),
 });
 
 export const viralResearchSnapshotSchema = z.object({
@@ -552,6 +577,143 @@ export type ViralResearchTopicCard = z.infer<
 export type ViralResearchSnapshot = z.infer<
   typeof viralResearchSnapshotSchema
 >;
+
+export const hotspotSourceKindSchema = z.enum([
+  "rss",
+  "atom",
+  "json_feed",
+  "rsshub",
+  "dashscope",
+]);
+
+export const hotspotSourceConfigSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(60),
+  /** rsshub 类型只存路由，运行时拼接 rsshubBaseUrl。 */
+  url: z.string().min(1).max(2048),
+  kind: hotspotSourceKindSchema,
+  enabled: z.boolean().default(true),
+});
+
+export const hotspotSourceStatusSchema = z.enum(["ok", "failed", "skipped"]);
+
+export const hotspotSourceReportSchema = z.object({
+  sourceId: z.string(),
+  sourceName: z.string(),
+  status: hotspotSourceStatusSchema,
+  itemCount: z.number().int().nonnegative(),
+  message: z.string().optional(),
+});
+
+export const hotspotItemSchema = z.object({
+  id: z.string(),
+  sourceId: z.string(),
+  sourceName: z.string(),
+  title: z.string(),
+  url: z.string().url(),
+  publishedAt: z.string().optional(),
+  summary: z.string().optional(),
+  trackIds: z.array(trackIdSchema).default([]),
+  matchedTerms: z.array(z.string()).default([]),
+});
+
+export const hotspotClusterSchema = z.object({
+  id: z.string(),
+  headline: z.string(),
+  itemIds: z.array(z.string()).min(1),
+  /** 命中该事件的独立来源数量，热度的主要成分。 */
+  sourceCount: z.number().int().positive(),
+  firstSeenAt: z.string(),
+  latestAt: z.string(),
+  heat: z.number(),
+  trackIds: z.array(trackIdSchema).default([]),
+});
+
+export const hotspotTopicCardSchema = z.object({
+  id: z.string(),
+  clusterId: z.string(),
+  title: z.string(),
+  hook: z.string(),
+  whyNow: z.string(),
+  targetAudience: z.string(),
+  trackIds: z.array(trackIdSchema).default([]),
+  shootability: z.enum(["low", "medium", "high"]),
+  requiredEvidence: z.array(z.string()).default([]),
+  /** 热点可用的时效窗口天数，过期后前端降权。 */
+  timeWindowDays: z.number().int().positive().max(30),
+  risks: z.array(z.string()).default([]),
+  sourceIds: z.array(z.string()).min(1),
+});
+
+export const hotspotSnapshotSchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  fetchedAt: z.string(),
+  expiresAt: z.string(),
+  sourceReports: z.array(hotspotSourceReportSchema).default([]),
+  items: z.array(hotspotItemSchema).max(120),
+  clusters: z.array(hotspotClusterSchema).max(20),
+  topicCards: z.array(hotspotTopicCardSchema).max(12),
+  limitations: z.array(z.string()).max(4).default([]),
+  degradedReason: z.string().nullable().optional(),
+});
+
+export type HotspotSourceKind = z.infer<typeof hotspotSourceKindSchema>;
+export type HotspotSourceConfig = z.infer<typeof hotspotSourceConfigSchema>;
+export type HotspotSourceStatus = z.infer<typeof hotspotSourceStatusSchema>;
+export type HotspotSourceReport = z.infer<typeof hotspotSourceReportSchema>;
+export type HotspotItem = z.infer<typeof hotspotItemSchema>;
+export type HotspotCluster = z.infer<typeof hotspotClusterSchema>;
+export type HotspotTopicCard = z.infer<typeof hotspotTopicCardSchema>;
+export type HotspotSnapshot = z.infer<typeof hotspotSnapshotSchema>;
+
+export const viralSamplePlatformSchema = z.enum([
+  "weixin_channels",
+  "douyin",
+  "xiaohongshu",
+  "bilibili",
+  "other",
+]);
+
+export const viralSampleMetricsSchema = z.object({
+  views: z.number().nonnegative().optional(),
+  likes: z.number().nonnegative().optional(),
+  comments: z.number().nonnegative().optional(),
+  shares: z.number().nonnegative().optional(),
+  favorites: z.number().nonnegative().optional(),
+  recommends: z.number().nonnegative().optional(),
+});
+
+/** 人工录入的爆款样本；REAL/Sites 暂不支持持久化。 */
+export const viralSampleSchema = z.object({
+  id: z.string().uuid(),
+  ownerId: z.string(),
+  url: z.string().url(),
+  title: z.string().trim().min(1).max(200),
+  platform: viralSamplePlatformSchema,
+  platformOther: z.string().trim().max(60).optional(),
+  visibleMetrics: viralSampleMetricsSchema.optional(),
+  notes: z.string().trim().max(2000).optional(),
+  /** 可选的结构拆解备注（钩子、节奏等），不自动生成数字。 */
+  structureNotes: z.string().trim().max(4000).optional(),
+  metricsSource: z.literal("manual"),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const viralSampleCreateSchema = z.object({
+  url: z.string().trim().url(),
+  title: z.string().trim().min(1).max(200),
+  platform: viralSamplePlatformSchema,
+  platformOther: z.string().trim().max(60).optional(),
+  visibleMetrics: viralSampleMetricsSchema.optional(),
+  notes: z.string().trim().max(2000).optional(),
+  structureNotes: z.string().trim().max(4000).optional(),
+});
+
+export type ViralSamplePlatform = z.infer<typeof viralSamplePlatformSchema>;
+export type ViralSample = z.infer<typeof viralSampleSchema>;
+export type ViralSampleCreate = z.infer<typeof viralSampleCreateSchema>;
 
 export const scriptDraftFormatSchema = z.enum([
   "koubo",
@@ -795,6 +957,10 @@ export const scriptDraftInputSchema = z.object({
   researchSnapshotId: z.string().optional(),
   selectedTopicCardId: z.string().optional(),
   selectedResearchItemIds: z.array(z.string()).max(5).optional(),
+  /** 由热点工作台带入；热点选题卡与其引用来源随快照读取。 */
+  hotspotSnapshotId: z.string().optional(),
+  hotspotClusterId: z.string().optional(),
+  hotspotTopicCardId: z.string().optional(),
 });
 
 export const scriptDraftOutputSchema = z.object({

@@ -7,6 +7,8 @@ import type {
   ViralResearchSnapshot,
 } from "@video-diagnosis/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
+// fixture 字段形状取自百炼官方文档示例：search_results 只有 index/title/url。
+import searchInfoFixture from "@/tests/fixtures/dashscope-search-info.json";
 import { defaultUserSettings } from "@/lib/settings/schema";
 import { selectOwnedHistoryItems } from "@/lib/viral-research/account-fit";
 import {
@@ -14,6 +16,7 @@ import {
   isViralResearchSnapshotExpired,
   readCachedViralResearchSnapshot,
   readViralResearchSnapshot,
+  viralResearchQueryKey,
   writeViralResearchSnapshot,
 } from "@/lib/viral-research/cache";
 import { viralResearchConfigFromSettings } from "@/lib/viral-research/config";
@@ -150,6 +153,64 @@ describe("viral research source policy", () => {
     ).toBe(false);
   });
 
+  it("snapshotHasExternalItems is true for manual samples without web search", async () => {
+    const { snapshotHasExternalItems, researchEvidenceBadgeLabel } = await import(
+      "@/lib/viral-research/query"
+    );
+    const snapshot = {
+      id: "s2",
+      ownerId: "o1",
+      query: { topic: "软水" },
+      provider: "viral-samples",
+      searchPerformed: true,
+      fetchedAt: new Date().toISOString(),
+      expiresAt: new Date().toISOString(),
+      items: [
+        {
+          id: "vs-1",
+          sourceType: "viral_sample" as const,
+          title: "爆款样本",
+          url: "https://example.com/v/1",
+          evidenceLevel: "verified_metric" as const,
+          relevanceReasons: ["人工录入"],
+        },
+      ],
+      topicCards: [],
+      commonPatterns: [],
+      limitations: [],
+    };
+    expect(snapshotHasExternalItems(snapshot)).toBe(true);
+    expect(researchEvidenceBadgeLabel(snapshot).label).toBe("已载入人工样本");
+  });
+
+  it("snapshotHasExternalItems stays true for legacy snapshots with samples but searchPerformed false", async () => {
+    const { snapshotHasExternalItems } = await import("@/lib/viral-research/query");
+    expect(
+      snapshotHasExternalItems({
+        id: "legacy",
+        ownerId: "o1",
+        query: { topic: "软水" },
+        provider: "viral-samples",
+        searchPerformed: false,
+        fetchedAt: new Date().toISOString(),
+        expiresAt: new Date().toISOString(),
+        items: [
+          {
+            id: "vs-legacy",
+            sourceType: "viral_sample",
+            title: "旧快照样本",
+            url: "https://example.com/v/legacy",
+            evidenceLevel: "verified_metric",
+            relevanceReasons: [],
+          },
+        ],
+        topicCards: [],
+        commonPatterns: [],
+        limitations: [],
+      }),
+    ).toBe(true);
+  });
+
   it("accepts preferred platform pages with domain expansion match", () => {
     expect(
       isPreferredVideoPlatformUrl("https://www.douyin.com/video/123"),
@@ -233,7 +294,7 @@ describe("DashScope native search", () => {
     expect(config.dashscope.apiKey).toBe("");
   });
 
-  it("发送原生 search_options 并使用安全过滤后的 search_info 作为来源", async () => {
+  it("文本分支发送 forced_search/max/freshness，并按域名给出证据等级", async () => {
     let requestedUrl = "";
     let requestedBody: Record<string, unknown> = {};
     const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -247,22 +308,17 @@ describe("DashScope native search", () => {
                 {
                   index: 1,
                   title: "智能灯光案例一",
-                  url: "https://example.com/one?utm_source=test",
-                  site_name: "案例站",
-                  view_count: 12_345,
-                  like_count: 678,
+                  url: "https://www.douyin.com/video/1?utm_source=test",
                 },
                 {
                   index: 2,
                   title: "智能灯光案例二",
-                  url: "https://example.com/two",
-                  site_name: "案例站",
+                  url: "https://www.ithome.com/0/800/001.htm",
                 },
                 {
                   index: 3,
                   title: "智能灯光案例三",
                   url: "https://example.com/three",
-                  site_name: "案例站",
                 },
                 { index: 4, title: "不安全", url: "javascript:alert(1)" },
               ],
@@ -272,6 +328,14 @@ describe("DashScope native search", () => {
                 message: {
                   content: JSON.stringify({
                     commonPatterns: ["前三秒用生活痛点建立冲突"],
+                    sourceJudgements: [
+                      {
+                        index: 1,
+                        relevant: true,
+                        kind: "platform_page",
+                        reason: "抖音智能灯光实拍",
+                      },
+                    ],
                     topicCards: [],
                   }),
                 },
@@ -294,11 +358,11 @@ describe("DashScope native search", () => {
     const parameters = requestedBody.parameters as Record<string, unknown>;
     expect(parameters.enable_search).toBe(true);
     expect(parameters.result_format).toBe("message");
-    expect(parameters.search_options).toMatchObject({
+    expect(parameters.search_options).toEqual({
       forced_search: true,
+      search_strategy: "max",
       enable_source: true,
       freshness: 30,
-      search_strategy: "max",
     });
     const input = requestedBody.input as {
       messages: Array<{ content: string }>;
@@ -309,15 +373,43 @@ describe("DashScope native search", () => {
     expect(input.messages[0]?.content).toContain(
       "排除时政、灾难、社会争议",
     );
+    expect(input.messages[0]?.content).toContain("同赛道关键词扩展检索");
+    expect(input.messages[0]?.content).toContain("sourceJudgements");
     expect(result.searchPerformed).toBe(true);
     expect(result.items).toHaveLength(3);
-    expect(result.items[0]?.url).toBe("https://example.com/one");
-    expect(result.items[0]?.evidenceLevel).toBe("verified_metric");
-    expect(result.items[0]?.visibleMetrics).toMatchObject({
-      views: 12_345,
-      likes: 678,
-    });
+    expect(result.items.map((item) => item.evidenceLevel)).toEqual([
+      "platform_page",
+      "media_article",
+      "public_source",
+    ]);
+    expect(result.items.some((item) => item.visibleMetrics)).toBe(false);
     expect(result.analysis?.commonPatterns).toEqual(["前三秒用生活痛点建立冲突"]);
+    expect(result.analysis?.sourceJudgements).toEqual([
+      {
+        index: 1,
+        relevant: true,
+        kind: "platform_page",
+        reason: "抖音智能灯光实拍",
+      },
+    ]);
+  });
+
+  it("联网结果不再产生 verified_metric，且互动指标一律为空", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify(searchInfoFixture), { status: 200 }),
+    );
+    const result = await searchDashScope(
+      runtimeConfig.dashscope,
+      { topic: "全屋智能" },
+      fetchImpl as typeof fetch,
+    );
+    expect(result.items).toHaveLength(5);
+    expect(
+      result.items.some((item) => item.evidenceLevel === "verified_metric"),
+    ).toBe(false);
+    expect(result.items.every((item) => item.visibleMetrics === undefined)).toBe(
+      true,
+    );
   });
 
   it("qwen3.7-plus 等多模态模型直接走 multimodal-generation，避免 text-generation url error", async () => {
@@ -363,6 +455,15 @@ describe("DashScope native search", () => {
     expect(requests.map((item) => item.url)).toEqual([
       "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
     ]);
+    const parameters = (
+      JSON.parse(String(requests[0]?.init?.body)) as {
+        parameters: { search_options: Record<string, unknown> };
+      }
+    ).parameters;
+    expect(parameters.search_options).toEqual({
+      search_strategy: "agent",
+      enable_source: true,
+    });
     expect(result.searchPerformed).toBe(true);
     expect(result.items[0]?.url).toBe("https://example.com/curtain");
   });
@@ -572,11 +673,9 @@ describe("DashScope native search", () => {
       { text: expect.any(String) },
     ]);
     expect(multimodalBody.parameters.incremental_output).toBe(true);
-    expect(multimodalBody.parameters.search_options).toMatchObject({
+    expect(multimodalBody.parameters.search_options).toEqual({
       search_strategy: "agent",
       enable_source: true,
-      prepend_search_result: true,
-      freshness: 30,
     });
     expect(result.status).toBe("ok");
     expect(result.searchPerformed).toBe(true);
@@ -651,12 +750,23 @@ describe("DashScope native search", () => {
 });
 
 describe("owner-scoped immutable cache", () => {
+  it("缓存 key 随 model 变化而失效", () => {
+    const query = { topic: "智能家居" };
+    expect(viralResearchQueryKey(query, "qwen-plus")).not.toBe(
+      viralResearchQueryKey(query, "qwen3.7-plus"),
+    );
+    expect(viralResearchQueryKey(query, "qwen-plus")).toBe(
+      viralResearchQueryKey(query, " QWEN-PLUS "),
+    );
+  });
+
   it("强刷只移动索引，旧快照仍可读", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-research-"));
     const query = { topic: "智能家居" };
+    const model = "qwen-plus";
     const firstFetchedAt = "2026-08-10T00:00:00.000Z";
     const first: ViralResearchSnapshot = {
-      id: createViralResearchSnapshotId(query, firstFetchedAt, "first"),
+      id: createViralResearchSnapshotId(query, model, firstFetchedAt, "first"),
       ownerId: "owner-a",
       query,
       provider: "dashscope-native-search",
@@ -681,22 +791,25 @@ describe("owner-scoped immutable cache", () => {
     await writeViralResearchSnapshot(first, {
       storageRoot: tempDir,
       cacheQuery: query,
+      cacheModel: model,
     });
 
     const secondFetchedAt = "2026-08-10T01:00:00.000Z";
     const second = {
       ...first,
-      id: createViralResearchSnapshotId(query, secondFetchedAt, "second"),
+      id: createViralResearchSnapshotId(query, model, secondFetchedAt, "second"),
       fetchedAt: secondFetchedAt,
       expiresAt: "2026-08-11T01:00:00.000Z",
     };
     await writeViralResearchSnapshot(second, {
       storageRoot: tempDir,
       cacheQuery: query,
+      cacheModel: model,
     });
 
     const current = await readCachedViralResearchSnapshot("owner-a", query, {
       storageRoot: tempDir,
+      model,
     });
     const old = await readViralResearchSnapshot("owner-a", first.id, {
       storageRoot: tempDir,
@@ -711,6 +824,52 @@ describe("owner-scoped immutable cache", () => {
     expect(
       isViralResearchSnapshotExpired(first, new Date("2026-08-11T00:00:00.000Z")),
     ).toBe(true);
+    expect(
+      await readCachedViralResearchSnapshot("owner-a", query, {
+        storageRoot: tempDir,
+        model: "qwen3.7-plus",
+      }),
+    ).toBeNull();
+  });
+
+  it("owner 目录只保留最近 30 个未被索引引用的快照", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-retention-"));
+    const query = { topic: "快照保留" };
+    const model = "qwen-plus";
+    const ids: string[] = [];
+    for (let index = 0; index < 34; index += 1) {
+      const fetchedAt = new Date(
+        Date.UTC(2026, 7, 10, 0, index, 0),
+      ).toISOString();
+      const snapshot: ViralResearchSnapshot = {
+        id: createViralResearchSnapshotId(
+          query,
+          model,
+          fetchedAt,
+          `entropy-${index}`,
+        ),
+        ownerId: "owner-a",
+        query,
+        provider: "dashscope-native-search",
+        searchPerformed: true,
+        fetchedAt,
+        expiresAt: fetchedAt,
+        items: [],
+        topicCards: [],
+        commonPatterns: [],
+        limitations: [],
+        degradedReason: null,
+      };
+      ids.push(snapshot.id);
+      await writeViralResearchSnapshot(snapshot, { storageRoot: tempDir });
+    }
+    const remaining = await Promise.all(
+      ids.map((id) =>
+        readViralResearchSnapshot("owner-a", id, { storageRoot: tempDir }),
+      ),
+    );
+    expect(remaining.filter(Boolean).length).toBeLessThanOrEqual(30);
+    expect(remaining.filter(Boolean).length).toBeGreaterThan(0);
   });
 });
 
@@ -747,41 +906,26 @@ describe("owner history percentile", () => {
 });
 
 describe("viral research service", () => {
-  it("模型未返回合格角度时不再用同一批来源补足三张兜底卡", async () => {
+  it("模型完全无法解析时不生成选题卡，只留人话局限", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-fallback-"));
-    let call = 0;
-    const fetchImpl = vi.fn(async () => {
-      call += 1;
-      const count = call === 1 ? 3 : 2;
-      return new Response(
+    const fetchImpl = vi.fn(async () =>
+      new Response(
         JSON.stringify({
           output: {
             search_info: {
-              search_results: Array.from({ length: count }, (_, index) => ({
+              search_results: Array.from({ length: 3 }, (_, index) => ({
                 index: index + 1,
                 title: `智能家居案例 ${index + 1}`,
-                url: `https://fallback${call}-${index}.example.com/video`,
+                url: `https://fallback-${index}.example.com/video`,
               })),
             },
-            choices: [
-              {
-                message: {
-                  content:
-                    call === 1
-                      ? "无法解析的模型输出"
-                      : JSON.stringify({
-                          commonPatterns: ["不应在两个来源时采用"],
-                          topicCards: [],
-                        }),
-                },
-              },
-            ],
+            choices: [{ message: { content: "无法解析的模型输出" } }],
           },
         }),
         { status: 200 },
-      );
-    });
-    const enough = await researchViralVideos(
+      ),
+    );
+    const result = await researchViralVideos(
       "owner-a",
       { query: { topic: "智能家居 fallback" } },
       {
@@ -791,15 +935,66 @@ describe("viral research service", () => {
         ownedHistory: [],
       },
     );
-    expect(enough.snapshot.topicCards).toEqual([]);
-    expect(enough.snapshot.limitations.join("；")).toContain(
-      "模型未返回由至少 3 条主题相关来源共同支撑的选题角度",
+    expect(result.snapshot.topicCards).toEqual([]);
+    expect(result.snapshot.commonPatterns).toEqual([]);
+    expect(result.snapshot.limitations.length).toBeLessThanOrEqual(2);
+    expect(result.snapshot.limitations.join("；")).toContain(
+      "这次没整理出选题角度",
     );
-    expect(enough.snapshot.commonPatterns).toEqual([]);
+  });
 
-    const insufficient = await researchViralVideos(
+  it("单条来源即可产出选题卡，并按证据等级分级", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-single-source-"));
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          ...searchInfoFixture,
+          output: {
+            ...searchInfoFixture.output,
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    commonPatterns: ["先讲失败案例，再给可复核的对比画面"],
+                    sourceJudgements: [
+                      {
+                        index: 1,
+                        relevant: true,
+                        kind: "platform_page",
+                        reason: "抖音全屋智能实拍，与主题直接相关",
+                      },
+                      {
+                        index: 5,
+                        relevant: false,
+                        kind: "generic_page",
+                        reason: "财经内容与主题无关",
+                      },
+                    ],
+                    topicCards: [
+                      {
+                        title: "回家一键场景到底怎么落地",
+                        whyNow: "近期同类改造集中出现，热度未验证",
+                        targetAudience: "准备装修的业主",
+                        sourceIndexes: [1],
+                        reusableStructures: ["结果前置"],
+                        originalAngle: "用本地真实项目重新拍摄",
+                        requiredEvidence: ["联动实拍"],
+                        productionCost: "low",
+                        risks: ["避免宣称绝对稳定"],
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await researchViralVideos(
       "owner-a",
-      { query: { topic: "智能家居 insufficient" } },
+      { query: { topic: "全屋智能" } },
       {
         config: runtimeConfig,
         fetchImpl: fetchImpl as typeof fetch,
@@ -807,16 +1002,33 @@ describe("viral research service", () => {
         ownedHistory: [],
       },
     );
-    expect(insufficient.snapshot.topicCards).toEqual([]);
-    expect(insufficient.snapshot.limitations.join("；")).toContain(
-      "主题相关且可追溯的独立外部来源少于 3 个，未生成选题卡。",
+    expect(result.snapshot.topicCards).toHaveLength(1);
+    expect(result.snapshot.topicCards[0]?.sourceIds).toHaveLength(1);
+    expect(result.snapshot.topicCards[0]?.title).toBe(
+      "回家一键场景到底怎么落地",
     );
-    expect(insufficient.snapshot.commonPatterns).toEqual([
-      "不应在两个来源时采用",
-    ]);
+    expect(result.snapshot.topicCards[0]?.evidenceStrength).toBe(
+      "platform_sourced",
+    );
+    expect(
+      result.snapshot.items.some(
+        (item) => item.evidenceLevel === "verified_metric",
+      ),
+    ).toBe(false);
+    expect(result.snapshot.items.map((item) => item.evidenceLevel)).toContain(
+      "media_article",
+    );
+    // 模型判定不相关的财经来源被丢弃。
+    expect(
+      result.snapshot.items.some((item) => item.url?.includes("finance")),
+    ).toBe(false);
+    expect(result.snapshot.limitations.length).toBeLessThanOrEqual(2);
+    expect(result.snapshot.limitations.join("；")).toContain(
+      "互动数据需要你自己点开核对",
+    );
   });
 
-  it("有至少 3 条相关资料和共性时生成明确降级的资料型角度", async () => {
+  it("模型未给角度时用共性归纳兜底，且不改写标题", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-pattern-card-"));
     const fetchImpl = vi.fn(async () =>
       new Response(
@@ -862,13 +1074,81 @@ describe("viral research service", () => {
     expect(
       result.snapshot.topicCards.every(
         (card) =>
-          card.title.startsWith("资料候选｜") && card.sourceIds.length === 3,
+          !card.title.startsWith("资料候选｜") &&
+          card.sourceIds.length >= 1 &&
+          card.evidenceStrength === "weak",
       ),
     ).toBe(true);
-    expect(result.snapshot.limitations.join("；")).toContain("资料型候选");
+    expect(result.snapshot.topicCards[0]?.requiredEvidence).toContain(
+      "本地水质或水垢实测",
+    );
+    expect(result.snapshot.limitations.length).toBeLessThanOrEqual(2);
   });
 
-  it("DashScope 取得 3 个安全来源后才归纳共性并命中 24h 缓存", async () => {
+  it("换模型后不复用旧缓存", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-model-key-"));
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output: {
+            search_info: {
+              search_results: [
+                {
+                  index: 1,
+                  title: "智能家居联动实拍",
+                  url: "https://example.com/model-key",
+                },
+              ],
+            },
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    commonPatterns: ["结果前置"],
+                    topicCards: [],
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      storageRoot: tempDir,
+      ownedHistory: [],
+      now: () => new Date("2026-08-10T00:00:00.000Z"),
+    };
+    const first = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      { ...options, config: runtimeConfig },
+    );
+    expect(first.cacheHit).toBe(false);
+    const sameModel = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      { ...options, config: runtimeConfig },
+    );
+    expect(sameModel.cacheHit).toBe(true);
+
+    const otherModel = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      {
+        ...options,
+        config: {
+          dashscope: { ...runtimeConfig.dashscope, model: "qwen3-max" },
+        },
+      },
+    );
+    expect(otherModel.cacheHit).toBe(false);
+    expect(otherModel.snapshot.id).not.toBe(first.snapshot.id);
+  });
+
+  it("DashScope 取得 3 个安全来源后才归纳共性并命中 72h 缓存", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-service-"));
     const fetchImpl = vi.fn(async () =>
       new Response(
@@ -955,9 +1235,8 @@ describe("viral research service", () => {
     ]);
     expect(first.snapshot.topicCards).toHaveLength(1);
     expect(first.snapshot.topicCards[0]?.sourceIds).toHaveLength(3);
-    expect(first.snapshot.topicCards[0]?.title).toBe(
-      "资料候选｜回家一秒全屋响应",
-    );
+    expect(first.snapshot.topicCards[0]?.title).toBe("回家一秒全屋响应");
+    expect(first.snapshot.topicCards[0]?.evidenceStrength).toBe("weak");
     expect(first.snapshot.degradedReason).toBeNull();
     const requestCount = fetchImpl.mock.calls.length;
 
@@ -968,7 +1247,8 @@ describe("viral research service", () => {
         config: runtimeConfig,
         fetchImpl: fetchImpl as typeof fetch,
         storageRoot: tempDir,
-        now: () => new Date("2026-08-10T23:59:59.000Z"),
+        // 48h 后仍在 72h TTL 内。
+        now: () => new Date("2026-08-12T00:00:00.000Z"),
         ownedHistory: history,
       },
     );
@@ -1023,6 +1303,8 @@ describe("viral research service", () => {
     expect(result.cacheHit).toBe(false);
     expect(result.snapshot.searchPerformed).toBe(true);
     expect(result.snapshot.items.length).toBeGreaterThanOrEqual(3);
-    expect(result.snapshot.limitations.join("；")).toContain("缓存写入失败");
+    expect(result.snapshot.limitations.length).toBeLessThanOrEqual(2);
+    // 技术性原因只进 degradedReason，不污染面向用户的 limitations。
+    expect(result.snapshot.degradedReason ?? "").toContain("缓存写入失败");
   });
 });

@@ -8,6 +8,7 @@ import {
   Database,
   FileSpreadsheet,
   Film,
+  Flame,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -22,6 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 工作流顺序：脚本工作台 → 发布前审片 → 数据匹配 → 数据分析
   const navigation = [
     { href: "/scripts", label: "脚本工作台", icon: ScrollText },
+    { href: "/hotspots", label: "研究热点", icon: Flame },
     { href: "/review", label: "发布前审片", icon: Clapperboard },
     sitesMode
       ? { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet }
@@ -61,7 +63,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ? pathname.startsWith("/review")
                     : item.href === "/scripts"
                       ? pathname.startsWith("/scripts")
-                      : pathname.startsWith(item.href);
+                      : item.href === "/hotspots"
+                        ? pathname.startsWith("/hotspots")
+                        : pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}

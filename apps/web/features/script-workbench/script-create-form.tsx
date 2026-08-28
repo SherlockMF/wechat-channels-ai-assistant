@@ -16,7 +16,7 @@ import type {
 import { viralResearchSnapshotSchema } from "@video-diagnosis/shared-types";
 import { Badge, Button, Card } from "@/components/ui";
 import { SelectWithOther } from "@/components/select-with-other";
-import { buildResearchQuery } from "@/lib/viral-research/query";
+import { buildResearchQuery, researchEvidenceBadgeLabel } from "@/lib/viral-research/query";
 import {
   SCRIPT_FORMAT_OPTIONS,
   SCRIPT_PROCESS_OPTIONS,
@@ -69,6 +69,7 @@ const VISIBLE_METRIC_LABELS: Record<string, string> = {
 const RESEARCH_SOURCE_LABELS: Record<string, string> = {
   dashscope: "DashScope 联网来源",
   owned_history: "账号历史",
+  viral_sample: "人工录入样本",
 };
 
 const PRODUCTION_COST_LABELS = {
@@ -209,10 +210,20 @@ function resolveTone(value: string): {
   return { tone: "other", toneOther: value.trim() };
 }
 
+export interface HotspotSeed {
+  snapshotId: string;
+  clusterId?: string;
+  topicCardId?: string;
+  title: string;
+  idea: string;
+}
+
 export function ScriptCreateForm({
   researchSourceScriptId,
+  hotspotSeed,
 }: {
   researchSourceScriptId?: string;
+  hotspotSeed?: HotspotSeed;
 }) {
   const router = useRouter();
   const researchBranch = Boolean(researchSourceScriptId);
@@ -230,7 +241,10 @@ export function ScriptCreateForm({
   const [processKinds, setProcessKinds] = useState<ScriptDraftProcessKind[]>([
     "plan_meeting",
   ]);
-  const [idea, setIdea] = useState("");
+  const [idea, setIdea] = useState(hotspotSeed?.idea ?? "");
+  const [useHotspotContext, setUseHotspotContext] = useState(
+    Boolean(hotspotSeed),
+  );
   const [existingScript, setExistingScript] = useState("");
   const [sellingPoints, setSellingPoints] = useState("");
   const [targetSeconds, setTargetSeconds] = useState("");
@@ -546,6 +560,15 @@ export function ScriptCreateForm({
         }
         input.selectedResearchItemIds = selectedResearchItemIds.slice(0, 5);
       }
+      if (useHotspotContext && hotspotSeed) {
+        input.hotspotSnapshotId = hotspotSeed.snapshotId;
+        if (hotspotSeed.clusterId) {
+          input.hotspotClusterId = hotspotSeed.clusterId;
+        }
+        if (hotspotSeed.topicCardId) {
+          input.hotspotTopicCardId = hotspotSeed.topicCardId;
+        }
+      }
       if (formatPayload.formatOther) {
         input.formatOther = formatPayload.formatOther;
       }
@@ -667,6 +690,30 @@ export function ScriptCreateForm({
           ))}
         </ol>
       </Card>
+
+      {hotspotSeed ? (
+        <Card className="space-y-2 p-4">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={useHotspotContext}
+              onChange={(event) => setUseHotspotContext(event.target.checked)}
+            />
+            <span>
+              <span className="font-semibold text-ink">带入热点背景</span>
+              {hotspotSeed.title ? (
+                <span className="ml-2 text-[#66736c]">
+                  {hotspotSeed.title}
+                </span>
+              ) : null}
+              <span className="mt-1 block text-xs text-[#7a8680]">
+                热点只用于说明「为什么现在讲」，不会带来销量、参数或效果结论；快照过期后会自动忽略。
+              </span>
+            </span>
+          </label>
+        </Card>
+      ) : null}
 
       {step === 1 ? (
       <Card className="space-y-4 p-5">
@@ -1098,9 +1145,12 @@ export function ScriptCreateForm({
           {research ? (
             <>
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge tone={research.searchPerformed ? "success" : "warning"}>
-                  {research.searchPerformed ? "已执行外部检索" : "未完成外部检索"}
-                </Badge>
+                {(() => {
+                  const badge = researchEvidenceBadgeLabel(research);
+                  return (
+                    <Badge tone={badge.tone}>{badge.label}</Badge>
+                  );
+                })()}
                 <Badge tone="neutral">{research.provider}</Badge>
                 <Badge
                   tone={Date.parse(research.expiresAt) <= Date.now() ? "warning" : "neutral"}

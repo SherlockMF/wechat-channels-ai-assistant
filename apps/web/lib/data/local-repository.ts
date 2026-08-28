@@ -14,6 +14,8 @@ import type {
   ScriptDraftTopic,
   VideoAsset,
   VideoMatch,
+  ViralSample,
+  ViralSampleCreate,
 } from "@video-diagnosis/shared-types";
 import { createId } from "@/lib/id";
 import type {
@@ -61,6 +63,10 @@ import {
   localSourcePaths,
   readLocalSourceFingerprint,
 } from "@/lib/data/local-source";
+import {
+  isHotspotSnapshotExpired,
+  readHotspotSnapshot,
+} from "@/lib/hotspots/cache";
 import {
   isViralResearchSnapshotExpired,
   readViralResearchSnapshot,
@@ -120,6 +126,7 @@ async function readState(): Promise<PersistedLocalState> {
         draftResults: persisted.draftResults ?? [],
         draftCoverBriefs: persisted.draftCoverBriefs ?? [],
         scriptDrafts: persisted.scriptDrafts ?? [],
+        viralSamples: persisted.viralSamples ?? [],
       };
       migrateDraftReviewVersions(cachedState);
       cachedDatabaseStamp = currentDatabaseStamp;
@@ -143,6 +150,7 @@ async function readState(): Promise<PersistedLocalState> {
       draftResults: persisted.draftResults ?? [],
       draftCoverBriefs: persisted.draftCoverBriefs ?? [],
       scriptDrafts: persisted.scriptDrafts ?? [],
+      viralSamples: persisted.viralSamples ?? [],
       sourceFingerprint: source.fingerprint,
     };
     migrateDraftReviewVersions(cachedState);
@@ -1424,6 +1432,23 @@ export class LocalRepository {
         ? storedResearchSnapshot
         : null;
     const selectedIds = new Set(input.selectedResearchItemIds ?? []);
+    const storedHotspotSnapshot = input.hotspotSnapshotId
+      ? await readHotspotSnapshot(ownerId, input.hotspotSnapshotId)
+      : null;
+    const hotspotSnapshot =
+      storedHotspotSnapshot && !isHotspotSnapshotExpired(storedHotspotSnapshot)
+        ? storedHotspotSnapshot
+        : null;
+    const hotspotTopicCard =
+      hotspotSnapshot?.topicCards.find(
+        (card) => card.id === input.hotspotTopicCardId,
+      ) ?? null;
+    const hotspotCluster =
+      hotspotSnapshot?.clusters.find(
+        (cluster) =>
+          cluster.id === (hotspotTopicCard?.clusterId ?? input.hotspotClusterId),
+      ) ?? null;
+    const hotspotItemIds = new Set(hotspotCluster?.itemIds ?? []);
     const request = {
       format: params.format,
       topic,
@@ -1438,6 +1463,11 @@ export class LocalRepository {
         researchSnapshot?.topicCards.find(
           (item) => item.id === input.selectedTopicCardId,
         ) ?? null,
+      hotspotSnapshot,
+      hotspotTopicCard,
+      hotspotItems:
+        hotspotSnapshot?.items.filter((item) => hotspotItemIds.has(item.id)) ??
+        [],
     };
     let output = await provider.generate(request);
     output = finalizeScriptOutput(request, {
@@ -1501,6 +1531,49 @@ export class LocalRepository {
       },
       title: existing.title,
       parentScriptDraftId: existing.id,
+    });
+  }
+
+  async listViralSamples(ownerId: string): Promise<ViralSample[]> {
+    const state = await readState();
+    return state.viralSamples
+      .filter((sample) => sample.ownerId === ownerId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  async createViralSample(
+    ownerId: string,
+    input: ViralSampleCreate,
+  ): Promise<ViralSample> {
+    return mutate((state) => {
+      const now = new Date().toISOString();
+      const sample: ViralSample = {
+        id: createId(),
+        ownerId,
+        url: input.url,
+        title: input.title.trim(),
+        platform: input.platform,
+        platformOther: input.platformOther?.trim() || undefined,
+        visibleMetrics: input.visibleMetrics,
+        notes: input.notes?.trim() || undefined,
+        structureNotes: input.structureNotes?.trim() || undefined,
+        metricsSource: "manual",
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.viralSamples.push(sample);
+      return sample;
+    });
+  }
+
+  async deleteViralSample(ownerId: string, sampleId: string): Promise<boolean> {
+    return mutate((state) => {
+      const index = state.viralSamples.findIndex(
+        (sample) => sample.ownerId === ownerId && sample.id === sampleId,
+      );
+      if (index < 0) return false;
+      state.viralSamples.splice(index, 1);
+      return true;
     });
   }
 }

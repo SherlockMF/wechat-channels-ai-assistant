@@ -6,7 +6,10 @@ import type {
   ViralResearchTopicCard,
 } from "@video-diagnosis/shared-types";
 
-export const VIRAL_RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export const VIRAL_RESEARCH_CACHE_TTL_MS = 72 * 60 * 60 * 1000;
+
+/** owner 目录只保留最近若干个不可变快照，其余按时间清理。 */
+export const VIRAL_RESEARCH_SNAPSHOT_RETENTION = 30;
 
 const optionalQueryField = z.string().trim().min(1).max(120).optional();
 
@@ -45,13 +48,22 @@ export interface ViralResearchRuntimeConfig {
   dashscope: DashScopeResearchConfig;
 }
 
+/** 模型对每条联网来源的打标结果，用于替代依赖空摘要的相关性判定。 */
+export interface ResearchSourceJudgement {
+  index: number;
+  relevant: boolean;
+  kind: "platform_page" | "media_article" | "generic_page";
+  reason: string;
+}
+
 export interface ResearchAnalysisDraft {
   commonPatterns: string[];
   topicCards: Array<
-    Omit<ViralResearchTopicCard, "id" | "sourceIds"> & {
+    Omit<ViralResearchTopicCard, "id" | "sourceIds" | "evidenceStrength"> & {
       sourceIndexes: number[];
     }
   >;
+  sourceJudgements: ResearchSourceJudgement[];
 }
 
 export interface AdapterResearchItem extends ViralResearchItem {
@@ -73,12 +85,18 @@ export interface ViralResearchServiceOptions {
   now?: () => Date;
   ownedHistory?: ImportedVideoRecord[];
   loadOwnedHistory?: () => Promise<ImportedVideoRecord[]>;
+  viralSamples?: import("@video-diagnosis/shared-types").ViralSample[];
+  loadViralSamples?: () => Promise<
+    import("@video-diagnosis/shared-types").ViralSample[]
+  >;
 }
 
 export interface ViralResearchServiceResult {
   snapshot: ViralResearchSnapshot;
   cacheHit: boolean;
   expired: boolean;
+  /** 快照已过期但仍可用（实时检索没拿到新来源时的兜底）。 */
+  stale?: boolean;
 }
 
 export type {

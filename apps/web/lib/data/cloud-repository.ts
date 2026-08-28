@@ -164,6 +164,7 @@ async function readState(): Promise<AppState> {
     draftResults,
     draftCoverBriefs,
     scriptDrafts,
+    viralSamples: [],
   };
 }
 
@@ -991,6 +992,27 @@ class SitesRepository extends CloudRepository {
       },
       title: existing.title,
       parentScriptDraftId: existing.id,
+    });
+  }
+
+  async listViralSamples(_ownerId: string): Promise<import("@video-diagnosis/shared-types").ViralSample[]> {
+    throw Object.assign(new Error("爆款样本库当前仅支持 LOCAL 模式"), {
+      status: 501,
+    });
+  }
+
+  async createViralSample(
+    _ownerId: string,
+    _input: import("@video-diagnosis/shared-types").ViralSampleCreate,
+  ): Promise<import("@video-diagnosis/shared-types").ViralSample> {
+    throw Object.assign(new Error("爆款样本库当前仅支持 LOCAL 模式"), {
+      status: 501,
+    });
+  }
+
+  async deleteViralSample(_ownerId: string, _sampleId: string): Promise<boolean> {
+    throw Object.assign(new Error("爆款样本库当前仅支持 LOCAL 模式"), {
+      status: 501,
     });
   }
 }

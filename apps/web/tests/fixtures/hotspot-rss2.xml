@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>家居科技快讯</title>
+    <link>https://feeds.example.com/</link>
+    <description>示例 RSS 2.0 源</description>
+    <item>
+      <title>某品牌发布全屋智能中控屏新品</title>
+      <link>https://feeds.example.com/news/1?utm_source=rss&amp;spm=a1.b2</link>
+      <pubDate>Thu, 27 Aug 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[<p>新一代中控屏支持 Matter 与场景联动，现场演示了智能灯光与智能窗帘。</p>]]></description>
+    </item>
+    <item>
+      <title>净水器新国标发布，直饮水质要求提高</title>
+      <link>https://feeds.example.com/news/2</link>
+      <pubDate>Wed, 26 Aug 2026 08:30:00 GMT</pubDate>
+      <description>反渗透滤芯与 TDS 检测口径统一，软水机同步纳入管理。</description>
+    </item>
+    <item>
+      <title>某明星八卦引发全网热议</title>
+      <link>https://feeds.example.com/news/3</link>
+      <pubDate>Wed, 26 Aug 2026 09:00:00 GMT</pubDate>
+      <description>与本账号赛道无关的娱乐新闻。</description>
+    </item>
+  </channel>
+</rss>

@@ -6,10 +6,14 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
+  Plus,
   RefreshCw,
+  RotateCcw,
   Save,
+  Trash2,
 } from "lucide-react";
 import { Badge, Button, Card, PageHeader, cn } from "@/components/ui";
+import { HotspotSection } from "@/features/settings/hotspot-section";
 import type { HealthCheck } from "@/lib/settings/types";
 import { defaultUserSettings } from "@/lib/settings/schema";
 import type { UserSettings } from "@/lib/settings/schema";
@@ -672,6 +676,7 @@ function ApiForm({
           若研究面板提示「免费额度已用尽」或「Model access denied」，请到百炼控制台充值、关闭「仅使用免费额度」，或确认 Key 有权调用所选模型与联网检索。
         </p>
       </section>
+      <HotspotSection settings={settings} onChange={onChange} />
       <p className="text-xs leading-5 text-[#78857e]">
         已保存的密钥以脱敏形式显示。若不想改密钥，保留带 * 的内容即可。
         各槽位 Key 与主模型在额度/限流时会自动降级（可在 .env 用 *_MODEL_FALLBACKS、DASHSCOPE_API_KEY_FALLBACKS 覆盖）。

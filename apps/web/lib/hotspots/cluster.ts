@@ -1,0 +1,135 @@
+import { createHash } from "node:crypto";
+import type { HotspotCluster, HotspotItem, TrackId } from "@video-diagnosis/shared-types";
+import {
+  HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD,
+  HOTSPOT_CLUSTER_TIME_WINDOW_MS,
+  HOTSPOT_MAX_CLUSTERS,
+} from "@/lib/hotspots/types";
+import { normalizeTrackText } from "@/lib/tracks/dictionary";
+
+export interface HotspotClusterOptions {
+  now: Date;
+  sourceIdsByItem?: Record<string, string[]>;
+  maxClusters?: number;
+}
+
+interface Member {
+  item: HotspotItem;
+  timestamp: number;
+  bigrams: Set<string>;
+  normalizedTitle: string;
+}
+
+function bigramSet(normalized: string): Set<string> {
+  const grams = new Set<string>();
+  for (let index = 0; index < normalized.length - 1; index += 1) {
+    grams.add(normalized.slice(index, index + 2));
+  }
+  return grams;
+}
+
+/** 集合版 Dice 系数：重复 bigram 不重复计数，对中文短标题足够稳。 */
+function diceSimilarity(left: Member, right: Member): number {
+  if (left.normalizedTitle && left.normalizedTitle === right.normalizedTitle) {
+    return 1;
+  }
+  const total = left.bigrams.size + right.bigrams.size;
+  if (total === 0) return 0;
+  let shared = 0;
+  for (const gram of left.bigrams) {
+    if (right.bigrams.has(gram)) shared += 1;
+  }
+  return (2 * shared) / total;
+}
+
+function recencyBonus(latestMs: number, nowMs: number): number {
+  const ageMs = nowMs - latestMs;
+  if (ageMs <= 24 * 60 * 60 * 1000) return 4;
+  if (ageMs <= HOTSPOT_CLUSTER_TIME_WINDOW_MS) return 2;
+  return 0;
+}
+
+function clusterId(itemIds: readonly string[]): string {
+  const digest = createHash("sha256")
+    .update([...itemIds].sort().join("|"))
+    .digest("hex");
+  return `hc-${digest.slice(0, 16)}`;
+}
+
+/**
+ * 同事件聚类：标题归一化后 bigram Dice ≥0.45 且时间差 ≤72h 视为同一事件。
+ * 贪心单遍分配，与簇内任一成员相似即归入，簇规模小所以全量比较可接受。
+ */
+export function clusterHotspotItems(
+  items: readonly HotspotItem[],
+  options: HotspotClusterOptions,
+): HotspotCluster[] {
+  const nowMs = options.now.getTime();
+  const sourceIdsByItem = options.sourceIdsByItem ?? {};
+  const members: Member[] = items.map((item) => {
+    const parsed = item.publishedAt ? Date.parse(item.publishedAt) : Number.NaN;
+    const normalizedTitle = normalizeTrackText(item.title);
+    return {
+      item,
+      timestamp: Number.isFinite(parsed) ? parsed : nowMs,
+      bigrams: bigramSet(normalizedTitle),
+      normalizedTitle,
+    };
+  });
+  members.sort((left, right) => left.timestamp - right.timestamp);
+
+  const groups: Member[][] = [];
+  for (const member of members) {
+    const target = groups.find((group) =>
+      group.some(
+        (existing) =>
+          Math.abs(existing.timestamp - member.timestamp) <=
+            HOTSPOT_CLUSTER_TIME_WINDOW_MS &&
+          diceSimilarity(existing, member) >=
+            HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD,
+      ),
+    );
+    if (target) target.push(member);
+    else groups.push([member]);
+  }
+
+  const clusters = groups.map((group) => {
+    const sourceIds = new Set<string>();
+    const trackIds: TrackId[] = [];
+    for (const member of group) {
+      const owners = sourceIdsByItem[member.item.id] ?? [member.item.sourceId];
+      owners.forEach((id) => sourceIds.add(id));
+      for (const trackId of member.item.trackIds) {
+        if (!trackIds.includes(trackId)) trackIds.push(trackId);
+      }
+    }
+    // headline 取命中来源最多的标题，同分时取最早出现的，保证结果可复现。
+    const headlineMember = [...group].sort((left, right) => {
+      const leftSources = (sourceIdsByItem[left.item.id] ?? [left.item.sourceId]).length;
+      const rightSources = (sourceIdsByItem[right.item.id] ?? [right.item.sourceId]).length;
+      if (leftSources !== rightSources) return rightSources - leftSources;
+      return left.timestamp - right.timestamp;
+    })[0];
+    const timestamps = group.map((member) => member.timestamp);
+    const firstSeenMs = Math.min(...timestamps);
+    const latestMs = Math.max(...timestamps);
+    const itemIds = group.map((member) => member.item.id);
+    return {
+      id: clusterId(itemIds),
+      headline: headlineMember?.item.title ?? group[0]?.item.title ?? "",
+      itemIds,
+      sourceCount: sourceIds.size,
+      firstSeenAt: new Date(firstSeenMs).toISOString(),
+      latestAt: new Date(latestMs).toISOString(),
+      heat:
+        sourceIds.size * 3 + group.length + recencyBonus(latestMs, nowMs),
+      trackIds,
+    } satisfies HotspotCluster;
+  });
+
+  clusters.sort((left, right) => {
+    if (right.heat !== left.heat) return right.heat - left.heat;
+    return Date.parse(right.latestAt) - Date.parse(left.latestAt);
+  });
+  return clusters.slice(0, options.maxClusters ?? HOTSPOT_MAX_CLUSTERS);
+}

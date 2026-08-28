@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import {
+  expandTrackTerms,
+  matchTracks,
+  normalizeTrackText,
+  trackLabel,
+} from "@/lib/tracks/dictionary";
 import type {
   ViralResearchItem,
   ViralResearchQuery,
@@ -31,12 +37,6 @@ const GENERIC_RESEARCH_TERMS = new Set([
   "话题",
   "选题",
 ]);
-
-const DOMAIN_TERM_EXPANSIONS: Array<[RegExp, string[]]> = [
-  [/净水|饮水|软水/u, ["净水", "软水", "水质", "水垢", "直饮", "饮水", "净水器", "软水机"]],
-  [/智能家居|全屋智能/u, ["智能家居", "全屋智能", "智能灯光", "智能窗帘", "智能安防", "家庭影院", "中控", "联动"]],
-  [/水电|工地|施工/u, ["水电", "工地", "施工", "布线", "管线", "电路", "验收"]],
-];
 
 export function clipResearchText(
   value: unknown,
@@ -86,7 +86,7 @@ export function stableResearchItemId(
 }
 
 function normalizedResearchText(value: string): string {
-  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return normalizeTrackText(value);
 }
 
 function queryTerms(query: ViralResearchQuery): string[] {
@@ -101,10 +101,10 @@ function queryTerms(query: ViralResearchQuery): string[] {
       if (!GENERIC_RESEARCH_TERMS.has(bigram)) terms.add(bigram);
     }
   }
-  for (const [pattern, expansions] of DOMAIN_TERM_EXPANSIONS) {
-    if (pattern.test(topic)) expansions.forEach((term) => terms.add(term));
+  for (const term of expandTrackTerms(query.topic, 32)) {
+    terms.add(normalizedResearchText(term));
   }
-  return [...terms];
+  return [...terms].filter(Boolean);
 }
 
 const VIDEO_PLATFORM_URL_PATTERN =
@@ -115,60 +115,68 @@ export function isPreferredVideoPlatformUrl(url: string | undefined): boolean {
   return VIDEO_PLATFORM_URL_PATTERN.test(url);
 }
 
+/** 模型对单条来源的打标；缺席时才回落到赛道词典。 */
+export interface ResearchRelevanceJudgement {
+  relevant: boolean;
+  kind: "platform_page" | "media_article" | "generic_page";
+  reason?: string;
+}
+
 /**
- * DashScope search_info can contain pages consulted during agent reasoning that
- * are unrelated to the requested video topic. Keep only results with a direct,
- * explainable lexical/domain match before they can become research evidence.
+ * 百炼 search_results 只有 index/title/url，摘要与站点恒为空，
+ * 因此宽松匹配只看标题：命中主题词或同赛道关键词即视为相关。
  */
+function dictionaryRelevance(
+  query: ViralResearchQuery,
+  item: ViralResearchItem,
+): string | undefined {
+  const haystack = normalizedResearchText(item.title);
+  if (!haystack) return undefined;
+  const matched = queryTerms(query).filter((term) => haystack.includes(term));
+  if (matched.length) {
+    return `标题命中本次主题关键词：${matched.slice(0, 3).join("、")}`;
+  }
+  const topicTracks = new Set(matchTracks(query.topic).trackIds);
+  if (!topicTracks.size) return undefined;
+  const itemMatch = matchTracks(item.title);
+  const sharedTrack = itemMatch.trackIds.find((id) => topicTracks.has(id));
+  if (!sharedTrack) return undefined;
+  return `标题命中「${trackLabel(sharedTrack)}」赛道关键词：${itemMatch.matchedTerms
+    .slice(0, 3)
+    .join("、")}`;
+}
+
 export function isResearchItemRelevant(
   query: ViralResearchQuery,
   item: ViralResearchItem,
 ): boolean {
-  if (item.sourceType === "owned_history") return true;
-  const haystack = normalizedResearchText(
-    `${item.title} ${item.snippet ?? ""} ${item.site ?? ""}`,
-  );
-  if (!haystack) return false;
-  const terms = queryTerms(query);
-  const matchedTerms = terms.filter((term) => haystack.includes(term));
-  const lexicalMatch =
-    matchedTerms.some((term) => term.length >= 3) ||
-    matchedTerms.filter((term) => term.length === 2).length >= 2 ||
-    matchedTerms.length >= 1;
-  if (lexicalMatch) return true;
-  if (isPreferredVideoPlatformUrl(item.url) && clipResearchText(item.title, 180)) {
-    for (const [pattern, expansions] of DOMAIN_TERM_EXPANSIONS) {
-      if (!pattern.test(query.topic)) continue;
-      if (
-        expansions.some((term) =>
-          haystack.includes(normalizedResearchText(term)),
-        )
-      ) {
-        return true;
-      }
-    }
+  if (item.sourceType === "owned_history" || item.sourceType === "viral_sample") {
+    return true;
   }
-  return false;
+  return dictionaryRelevance(query, item) !== undefined;
 }
 
 export function filterResearchItemsByQuery(
   query: ViralResearchQuery,
   candidates: ViralResearchItem[],
+  judgements: ReadonlyMap<string, ResearchRelevanceJudgement> = new Map(),
 ): ViralResearchItem[] {
   return candidates.flatMap((item) => {
-    if (!isResearchItemRelevant(query, item)) return [];
-    if (item.sourceType === "owned_history") return [item];
-    return [
-      {
-        ...item,
-        relevanceReasons: isPreferredVideoPlatformUrl(item.url)
-          ? [
-              "来自优先短视频平台页面",
-              "标题或摘要与本次研究主题存在词义匹配",
-            ]
-          : ["标题或摘要与本次研究主题存在直接词义匹配"],
-      },
-    ];
+    if (item.sourceType === "owned_history" || item.sourceType === "viral_sample") {
+      return [item];
+    }
+    const judgement = judgements.get(item.id);
+    if (judgement) {
+      if (!judgement.relevant) return [];
+      const reason =
+        clipResearchText(judgement.reason, 160) ??
+        dictionaryRelevance(query, item) ??
+        "模型判定与本次研究主题相关";
+      return [{ ...item, relevanceReasons: [reason] }];
+    }
+    const reason = dictionaryRelevance(query, item);
+    if (!reason) return [];
+    return [{ ...item, relevanceReasons: [reason] }];
   });
 }
 

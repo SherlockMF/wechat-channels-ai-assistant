@@ -6,10 +6,12 @@ import {
   type ViralResearchTopicCard,
 } from "@video-diagnosis/shared-types";
 import { normalizeOwnerId } from "@/lib/data/owner";
+import { requiredEvidenceForTopic } from "@/lib/tracks/dictionary";
 import {
   applyOwnerAccountFit,
   selectOwnedHistoryItems,
 } from "@/lib/viral-research/account-fit";
+import { viralSamplesToResearchItems } from "@/lib/viral-research/samples";
 import {
   createViralResearchSnapshotId,
   isViralResearchSnapshotExpired,
@@ -22,6 +24,7 @@ import {
   clipResearchText,
   enforceResearchItemPolicy,
   filterResearchItemsByQuery,
+  type ResearchRelevanceJudgement,
 } from "@/lib/viral-research/source-policy";
 import {
   VIRAL_RESEARCH_CACHE_TTL_MS,
@@ -45,7 +48,7 @@ function topicCardsFromAnalysis(
   dashscope: ResearchAdapterResult,
   allowedDashIds: Set<string>,
 ): ViralResearchTopicCard[] {
-  if (!dashscope.analysis || allowedDashIds.size < 3) return [];
+  if (!dashscope.analysis || allowedDashIds.size < 1) return [];
   const sourceIdsByIndex = new Map<number, string>();
   for (const item of dashscope.items) {
     if (item.sourceIndex && allowedDashIds.has(item.id)) {
@@ -70,8 +73,9 @@ function topicCardsFromAnalysis(
       requiredEvidence: card.requiredEvidence,
       productionCost: card.productionCost,
       risks: card.risks,
+      evidenceStrength: "weak" as const,
     }))
-    .filter((card) => card.sourceIds.length >= 3)
+    .filter((card) => card.sourceIds.length >= 1)
     .slice(0, 3);
 }
 
@@ -93,26 +97,13 @@ function patternSourceScore(pattern: string, source: ViralResearchItem): number 
   return matches / expected.size;
 }
 
-function evidenceRequirements(query: ViralResearchQuery): string[] {
-  if (/净水|饮水|软水/u.test(query.topic)) {
-    return ["本地水质或水垢实测", "同户型配置与成本口径", "安装前后可复核画面"];
-  }
-  if (/智能家居|全屋智能/u.test(query.topic)) {
-    return ["真实设备联动过程", "触发条件与失败边界", "本地项目同机位实拍"];
-  }
-  if (/水电|工地|施工/u.test(query.topic)) {
-    return ["施工节点近景", "验收标准出处", "问题与整改前后对比"];
-  }
-  return ["本账号真实案例", "过程或结果实拍", "适用条件与限制"];
-}
-
 function topicCardsFromCommonPatterns(
   snapshotId: string,
   query: ViralResearchQuery,
   dashscope: ResearchAdapterResult,
   externalItems: ViralResearchItem[],
 ): ViralResearchTopicCard[] {
-  if (!dashscope.analysis?.commonPatterns.length || externalItems.length < 3) {
+  if (!dashscope.analysis?.commonPatterns.length || externalItems.length < 1) {
     return [];
   }
   const seenSourceSets = new Set<string>();
@@ -126,30 +117,41 @@ function topicCardsFromCommonPatterns(
       .sort((left, right) => right.score - left.score || left.position - right.position)
       .slice(0, 3)
       .map(({ source }) => source);
-    if (sources.length < 3) return [];
+    if (sources.length < 1) return [];
     const sourceIds = sources.map((source) => source.id);
     const sourceKey = [...sourceIds].sort().join("|");
     if (seenSourceSets.has(sourceKey)) return [];
     seenSourceSets.add(sourceKey);
     const summary = pattern.split(/[：:。；;]/u)[0]?.trim() || "主题共性结构";
-    const title = `资料候选｜${clipResearchText(summary, 42) ?? "主题共性结构"}`;
     return [
       {
-        id: topicCardId(snapshotId, title),
-        title,
+        id: topicCardId(snapshotId, summary),
+        title: clipResearchText(summary, 42) ?? "主题共性结构",
         whyNow:
-          "由本次主题相关公开资料归纳，但来源没有足够的公开互动指标，只能作为内容结构候选，不能视为爆款验证。",
+          "由本次主题相关的公开资料归纳，是内容结构候选，不代表已被验证的爆款。",
         targetAudience:
           query.audience ?? "与本次主题存在明确需求的目标用户",
         sourceIds,
         reusableStructures: [pattern],
         originalAngle: `结合${query.region ?? "本地"}真实项目、客户问题和可拍素材重新取材，不复述来源表达。`,
-        requiredEvidence: evidenceRequirements(query),
+        requiredEvidence: requiredEvidenceForTopic(query.topic),
         productionCost: "medium" as const,
         risks: ["外部热度未经公开指标验证", "发布前需逐条核对来源与事实"],
+        evidenceStrength: "weak" as const,
       },
     ];
   }).slice(0, 3);
+}
+
+/** 卡片证据强度取其引用来源里最强的一档。 */
+function cardEvidenceStrength(
+  sourceIds: string[],
+  levelById: ReadonlyMap<string, ViralResearchItem["evidenceLevel"]>,
+): ViralResearchTopicCard["evidenceStrength"] {
+  const levels = sourceIds.map((id) => levelById.get(id));
+  if (levels.includes("platform_page")) return "platform_sourced";
+  if (levels.includes("media_article")) return "media_sourced";
+  return "weak";
 }
 
 function completeTopicCards(
@@ -160,28 +162,12 @@ function completeTopicCards(
   externalItems: ViralResearchItem[],
 ): ViralResearchTopicCard[] {
   const analyzed = topicCardsFromAnalysis(snapshotId, dashscope, allowedDashIds);
-  const verifiedMetricIds = new Set(
-    externalItems
-      .filter((item) => item.evidenceLevel === "verified_metric")
-      .map((item) => item.id),
-  );
-  const labeledAnalyzed = analyzed.map((card) => {
-    const verifiedMetricCount = card.sourceIds.filter((id) =>
-      verifiedMetricIds.has(id),
-    ).length;
-    if (verifiedMetricCount >= 3) return card;
-    return {
-      ...card,
-      title: card.title.startsWith("资料候选｜")
-        ? card.title
-        : `资料候选｜${card.title}`,
-      whyNow: `外部热度未验证：${card.whyNow}`,
-      risks: [...new Set(["引用来源缺少足够的公开互动指标", ...card.risks])],
-    };
-  });
-  const candidates = labeledAnalyzed.length
-    ? labeledAnalyzed
+  const candidates = analyzed.length
+    ? analyzed
     : topicCardsFromCommonPatterns(snapshotId, query, dashscope, externalItems);
+  const levelById = new Map(
+    externalItems.map((item) => [item.id, item.evidenceLevel] as const),
+  );
   const seenTitles = new Set<string>();
   const seenSourceSets = new Set<string>();
   return candidates
@@ -193,7 +179,11 @@ function completeTopicCards(
       seenSourceSets.add(sourceKey);
       return true;
     })
-    .slice(0, 3);
+    .slice(0, 3)
+    .map((card) => ({
+      ...card,
+      evidenceStrength: cardEvidenceStrength(card.sourceIds, levelById),
+    }));
 }
 
 async function ownerHistory(
@@ -211,23 +201,54 @@ async function ownerHistory(
   }
 }
 
+async function manualSamples(
+  options: ViralResearchServiceOptions,
+): Promise<import("@video-diagnosis/shared-types").ViralSample[]> {
+  if (options.viralSamples) return options.viralSamples;
+  if (!options.loadViralSamples) return [];
+  try {
+    return await options.loadViralSamples();
+  } catch {
+    return [];
+  }
+}
+
 function uniqueReasons(...reasons: Array<string | undefined>): string[] {
   return [...new Set(reasons.filter((reason): reason is string => Boolean(reason)))];
 }
 
+/** 联网结果拿不到互动指标，只能按证据等级排序；同级保持原始顺序。 */
+const EXTERNAL_EVIDENCE_RANK: Record<string, number> = {
+  verified_metric: 4,
+  platform_page: 3,
+  media_article: 2,
+  public_source: 1,
+};
+
 function externalEvidenceScore(item: ViralResearchItem): number {
-  const metrics = item.visibleMetrics;
-  const metricScore = metrics
-    ? 1_000_000_000 +
-      (metrics.views ?? 0) * 1_000 +
-      (metrics.likes ?? 0) * 100 +
-      (metrics.comments ?? 0) * 10 +
-      (metrics.shares ?? 0)
-    : 0;
-  const platformScore = item.url && /(?:douyin\.com|xiaohongshu\.com|bilibili\.com|weixin\.qq\.com|youtube\.com)/iu.test(item.url)
-    ? 100_000_000
-    : 0;
-  return metricScore + platformScore;
+  return EXTERNAL_EVIDENCE_RANK[item.evidenceLevel] ?? 0;
+}
+
+function relevanceJudgementsById(
+  dashscope: ResearchAdapterResult,
+): Map<string, ResearchRelevanceJudgement> {
+  const judgements = new Map<string, ResearchRelevanceJudgement>();
+  const byIndex = new Map(
+    (dashscope.analysis?.sourceJudgements ?? []).map(
+      (judgement) => [judgement.index, judgement] as const,
+    ),
+  );
+  for (const item of dashscope.items) {
+    const judgement =
+      item.sourceIndex === undefined ? undefined : byIndex.get(item.sourceIndex);
+    if (!judgement) continue;
+    judgements.set(item.id, {
+      relevant: judgement.relevant,
+      kind: judgement.kind,
+      reason: judgement.reason,
+    });
+  }
+  return judgements;
 }
 
 export async function researchViralVideos(
@@ -239,8 +260,10 @@ export async function researchViralVideos(
   const owner = normalizeOwnerId(ownerId);
   const config = options.config ?? (await resolveViralResearchConfig());
   const now = options.now?.() ?? new Date();
+  const model = config.dashscope.model;
   const cached = await readCachedViralResearchSnapshot(owner, input.query, {
     storageRoot: options.storageRoot,
+    model,
   });
   if (
     cached &&
@@ -251,15 +274,17 @@ export async function researchViralVideos(
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const [dashscope, history] = await Promise.all([
+  const [dashscope, history, samples] = await Promise.all([
     searchDashScope(config.dashscope, input.query, fetchImpl),
     ownerHistory(options),
+    manualSamples(options),
   ]);
 
   const safeExternalItems = enforceResearchItemPolicy(dashscope.items, 100);
   const relevantExternalItems = filterResearchItemsByQuery(
     input.query,
     safeExternalItems,
+    relevanceJudgementsById(dashscope),
   );
   const externalItems = enforceResearchItemPolicy(
     relevantExternalItems
@@ -275,27 +300,37 @@ export async function researchViralVideos(
   if (externalItems.length === 0 && cached) {
     const reason = uniqueReasons(
       dashscope.degradedReason,
-      "实时检索失败，返回已过期的 owner 私有快照",
+      "实时检索未取得新来源，返回已过期的 owner 私有快照",
     ).join("；");
     return {
       snapshot: viralResearchSnapshotSchema.parse({
         ...cached,
-        limitations: [...new Set([...cached.limitations, reason])],
+        limitations: [
+          ...new Set([
+            ...cached.limitations,
+            "这次没检索到新的公开来源，下面是上一次的研究结果。",
+          ]),
+        ].slice(0, 2),
         degradedReason: reason,
       }),
       cacheHit: true,
       expired: true,
+      stale: true,
     };
   }
 
   const accountAdjusted = applyOwnerAccountFit(externalItems, history.records);
+  const sampleItems = enforceResearchItemPolicy(
+    viralSamplesToResearchItems(samples),
+    5,
+  );
   const historyItems = selectOwnedHistoryItems(input.query, history.records, 2);
   const items = enforceResearchItemPolicy(
-    [...accountAdjusted, ...historyItems],
+    [...sampleItems, ...accountAdjusted, ...historyItems],
     10,
   );
   const fetchedAt = now.toISOString();
-  const snapshotId = createViralResearchSnapshotId(input.query, fetchedAt);
+  const snapshotId = createViralResearchSnapshotId(input.query, model, fetchedAt);
   const allowedDashIds = new Set(
     items
       .filter((item) => item.sourceType === "dashscope")
@@ -316,36 +351,34 @@ export async function researchViralVideos(
     externalItems,
   );
 
-  const limitations = [
-    "DashScope 联网来源只证明公开网页可检索，不等同于平台已验证的爆款指标。",
-    ...(canSummarizeCommonalities
-      ? []
-      : ["暂无可追溯的外部短视频页面，未归纳跨网共性。"]),
-    ...(externalItems.length >= 1 && topicCards.length > 0
-      ? [
-          topicCards.some((card) => card.title.startsWith("资料候选｜"))
-            ? "选题角度由主题相关公开资料的共性归纳生成，但来源缺少公开互动指标，仅可作为资料型候选。"
-            : "选题卡基于可追溯且主题相关的来源生成，但仍需逐条复核，不能视为爆火保证。",
-        ]
-      : [
-          externalItems.length < 3
-            ? "主题相关且可追溯的独立外部来源少于 3 个，未生成选题卡。"
-            : "模型未返回由至少 3 条主题相关来源共同支撑的选题角度，未生成选题卡。",
-        ]),
-    ...(history.records.length < 3
-      ? ["账号历史样本不足，账号适配度仅作 unknown 处理。"]
-      : []),
-    ...(history.error ? [history.error] : []),
-    ...uniqueReasons(dashscope.degradedReason),
-  ];
+  // 只保留两条人话；技术性原因统一放进 degradedReason。
+  const limitations: string[] = [];
+  if (externalItems.length > 0) {
+    limitations.push(
+      "联网来源只能证明网页可访问，互动数据需要你自己点开核对。",
+    );
+  } else if (sampleItems.length > 0) {
+    limitations.push("本次未执行联网检索，下方来源来自你录入的爆款样本。");
+  }
+  if (externalItems.length === 0 && sampleItems.length === 0) {
+    limitations.push("这次没检索到可用的公开来源，可以换个关键词再试一次。");
+  } else if (externalItems.length > 0 && topicCards.length === 0) {
+    limitations.push("这次没整理出选题角度，下方来源仍可直接点开参考。");
+  } else if (history.records.length < 3 && externalItems.length > 0) {
+    limitations.push(
+      "账号历史样本不足，暂时无法判断这些选题和你账号的适配度。",
+    );
+  }
   const degradedReasons = uniqueReasons(
     dashscope.status !== "ok" ? dashscope.degradedReason : undefined,
-    externalItems.length === 0
+    externalItems.length === 0 && sampleItems.length === 0
       ? "没有取得主题相关且可追溯的外部研究来源"
       : undefined,
+    history.error,
   );
   const providers = [
     ...(externalItems.length ? ["dashscope-native-search"] : []),
+    ...(sampleItems.length ? ["viral-samples"] : []),
     ...(historyItems.length ? ["owned-history"] : []),
   ];
   const snapshot = viralResearchSnapshotSchema.parse({
@@ -353,13 +386,13 @@ export async function researchViralVideos(
     ownerId: owner,
     query: input.query,
     provider: providers.join("+") || "none",
-    searchPerformed: externalItems.length > 0,
+    searchPerformed: externalItems.length > 0 || sampleItems.length > 0,
     fetchedAt,
     expiresAt: new Date(now.getTime() + VIRAL_RESEARCH_CACHE_TTL_MS).toISOString(),
     items,
     topicCards,
     commonPatterns,
-    limitations: [...new Set(limitations)],
+    limitations: [...new Set(limitations)].slice(0, 2),
     degradedReason: degradedReasons.length
       ? degradedReasons.join("；").slice(0, 600)
       : null,
@@ -368,18 +401,20 @@ export async function researchViralVideos(
   try {
     await writeViralResearchSnapshot(snapshot, {
       storageRoot: options.storageRoot,
-      ...(externalItems.length > 0 ? { cacheQuery: input.query } : {}),
+      ...(externalItems.length > 0
+        ? { cacheQuery: input.query, cacheModel: model }
+        : {}),
     });
     return { snapshot, cacheHit: false, expired: false };
   } catch {
-    const cacheWriteLimitation = "研究结果缓存写入失败，本次仍返回实时检索结果但不会复用缓存";
+    const cacheWriteReason =
+      "研究结果缓存写入失败，本次仍返回实时检索结果但不会复用缓存";
     return {
       snapshot: viralResearchSnapshotSchema.parse({
         ...snapshot,
-        limitations: [...new Set([...snapshot.limitations, cacheWriteLimitation])],
         degradedReason: uniqueReasons(
           snapshot.degradedReason ?? undefined,
-          cacheWriteLimitation,
+          cacheWriteReason,
         ).join("；").slice(0, 600) || null,
       }),
       cacheHit: false,

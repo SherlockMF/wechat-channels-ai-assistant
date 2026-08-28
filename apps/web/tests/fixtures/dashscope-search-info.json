@@ -1,0 +1,42 @@
+{
+  "_comment": "字段形状取自阿里云百炼原生 text-generation 官方文档示例：output.search_info.search_results 每条只有 index/title/url，真实返回不含摘要、站点名与任何互动指标（播放/点赞/转发）。此处的标题与链接为按该形状自造的智能家居/净水样例。",
+  "output": {
+    "search_info": {
+      "search_results": [
+        {
+          "index": 1,
+          "title": "全屋智能灯光联动改造实录：回家一键场景",
+          "url": "https://www.douyin.com/video/7412345678901234567"
+        },
+        {
+          "index": 2,
+          "title": "Matter 生态新品盘点：智能门锁与中控屏怎么选",
+          "url": "https://www.ithome.com/0/812/345.htm"
+        },
+        {
+          "index": 3,
+          "title": "净水器滤芯更换周期实测：水质 TDS 前后对比",
+          "url": "https://www.smzdm.com/p/123456789/"
+        },
+        {
+          "index": 4,
+          "title": "软水机安装避坑：水垢问题到底能不能解决",
+          "url": "https://example.com/water/softener-guide"
+        },
+        {
+          "index": 5,
+          "title": "本周股市收评与宏观数据点评",
+          "url": "https://example.com/finance/weekly"
+        }
+      ]
+    },
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "{}"
+        }
+      }
+    ]
+  }
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { repository, requestOwnerId } from "@/lib/data/repository";
+import { loadViralSamplesForResearch } from "@/lib/viral-research/samples";
 import { viralResearchRequestSchema } from "@/lib/viral-research/types";
 
 export const runtime = "nodejs";
@@ -25,6 +26,8 @@ async function runResearch(request: Request, body: unknown) {
   const { researchViralVideos } = await import("@/lib/viral-research/service");
   const result = await researchViralVideos(ownerId, input, {
     loadOwnedHistory: () => repository.listOwnerVideoRecords(ownerId),
+    loadViralSamples: () =>
+      loadViralSamplesForResearch(() => repository.listViralSamples(ownerId)),
   });
   return NextResponse.json(result, { headers: privateResponse });
 }
