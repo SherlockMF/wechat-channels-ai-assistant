@@ -481,6 +481,20 @@ export const trackIdSchema = z.enum([
 
 export type TrackId = z.infer<typeof trackIdSchema>;
 
+/** 工作台支持的目标内容平台；能力目录决定各平台当前能做什么。 */
+export const contentPlatformSchema = z.enum([
+  "weixin_channels",
+  "douyin",
+  "xiaohongshu",
+  "bilibili",
+  "kuaishou",
+  "youtube_shorts",
+  "tiktok",
+  "other",
+]);
+
+export type ContentPlatform = z.infer<typeof contentPlatformSchema>;
+
 /**
  * 联网检索只能证明来源可被公开访问，拿不到互动指标；
  * verified_metric 仅用于人工录入的爆款样本。
@@ -555,6 +569,8 @@ export const viralResearchSnapshotSchema = z.object({
     audience: z.string().optional(),
     contentGoal: z.string().optional(),
     region: z.string().optional(),
+    targetPlatforms: z.array(contentPlatformSchema).optional(),
+    platformOther: z.string().optional(),
   }),
   provider: z.string(),
   searchPerformed: z.boolean(),
@@ -626,6 +642,21 @@ export const hotspotClusterSchema = z.object({
   firstSeenAt: z.string(),
   latestAt: z.string(),
   heat: z.number(),
+  /** 热度分项，旧快照缺省时按零分处理。 */
+  scoreBreakdown: z
+    .object({
+      sourceDiversity: z.number().nonnegative(),
+      itemVolume: z.number().nonnegative(),
+      recency: z.number().nonnegative(),
+      dateConfidence: z.number().nonnegative(),
+    })
+    .default({
+      sourceDiversity: 0,
+      itemVolume: 0,
+      recency: 0,
+      dateConfidence: 0,
+    }),
+  confidence: z.enum(["low", "medium", "high"]).default("low"),
   trackIds: z.array(trackIdSchema).default([]),
 });
 
@@ -667,13 +698,7 @@ export type HotspotCluster = z.infer<typeof hotspotClusterSchema>;
 export type HotspotTopicCard = z.infer<typeof hotspotTopicCardSchema>;
 export type HotspotSnapshot = z.infer<typeof hotspotSnapshotSchema>;
 
-export const viralSamplePlatformSchema = z.enum([
-  "weixin_channels",
-  "douyin",
-  "xiaohongshu",
-  "bilibili",
-  "other",
-]);
+export const viralSamplePlatformSchema = contentPlatformSchema;
 
 export const viralSampleMetricsSchema = z.object({
   views: z.number().nonnegative().optional(),
@@ -684,32 +709,52 @@ export const viralSampleMetricsSchema = z.object({
   recommends: z.number().nonnegative().optional(),
 });
 
-/** 人工录入的爆款样本；REAL/Sites 暂不支持持久化。 */
-export const viralSampleSchema = z.object({
-  id: z.string().uuid(),
-  ownerId: z.string(),
-  url: z.string().url(),
-  title: z.string().trim().min(1).max(200),
-  platform: viralSamplePlatformSchema,
-  platformOther: z.string().trim().max(60).optional(),
-  visibleMetrics: viralSampleMetricsSchema.optional(),
-  notes: z.string().trim().max(2000).optional(),
-  /** 可选的结构拆解备注（钩子、节奏等），不自动生成数字。 */
-  structureNotes: z.string().trim().max(4000).optional(),
-  metricsSource: z.literal("manual"),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "只允许 http(s) 链接");
 
-export const viralSampleCreateSchema = z.object({
-  url: z.string().trim().url(),
-  title: z.string().trim().min(1).max(200),
-  platform: viralSamplePlatformSchema,
-  platformOther: z.string().trim().max(60).optional(),
-  visibleMetrics: viralSampleMetricsSchema.optional(),
-  notes: z.string().trim().max(2000).optional(),
-  structureNotes: z.string().trim().max(4000).optional(),
-});
+/** 人工录入的爆款样本；REAL/Sites 暂不支持持久化。 */
+const viralSampleContentSchema = z
+  .object({
+    url: httpUrlSchema,
+    title: z.string().trim().min(1).max(200),
+    platform: viralSamplePlatformSchema,
+    platformOther: z.string().trim().min(1).max(60).optional(),
+    visibleMetrics: viralSampleMetricsSchema.optional(),
+    notes: z.string().trim().max(2000).optional(),
+    /** 可选的结构拆解备注（钩子、节奏等），不自动生成数字。 */
+    structureNotes: z.string().trim().max(4000).optional(),
+  })
+  .superRefine((sample, ctx) => {
+    if (sample.platform === "other" && !sample.platformOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["platformOther"],
+        message: "选择其他平台时必须填写平台名称",
+      });
+    }
+  });
+
+export const viralSampleSchema = viralSampleContentSchema.and(
+  z.object({
+    id: z.string().uuid(),
+    ownerId: z.string(),
+    metricsSource: z.literal("manual"),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }),
+);
+
+export const viralSampleCreateSchema = viralSampleContentSchema;
 
 export type ViralSamplePlatform = z.infer<typeof viralSamplePlatformSchema>;
 export type ViralSample = z.infer<typeof viralSampleSchema>;
@@ -873,6 +918,55 @@ export const scriptReviewSchema = z.object({
   ),
 });
 
+export const scriptDeliveryGuideSchema = z.object({
+  version: z.literal(1),
+  overallTone: z.string().max(200),
+  overallPace: z.enum(["slow", "normal", "fast"]),
+  rehearsalNotes: z.array(z.string().max(300)).max(8),
+  blocks: z.array(
+    z.object({
+      kind: z.enum(["script", "timeline_say"]),
+      order: z.number().int().positive().optional(),
+      sourceText: z.string().max(20_000),
+      sourceHash: z.string().regex(/^[a-f0-9]{64}$/u),
+      segments: z.array(
+        z.object({
+          text: z.string().max(2_000),
+          /** 数字、英文、型号和符号展开后的实际念法；普通中文可与 text 相同。 */
+          spokenAs: z.string().max(4_000),
+          pace: z.enum(["slow", "normal", "fast"]),
+          emotion: z.enum([
+            "neutral",
+            "warm",
+            "confident",
+            "serious",
+            "surprised",
+            "questioning",
+            "reassuring",
+          ]),
+          intensity: z.number().int().min(1).max(3),
+          emphasis: z.array(z.string().max(100)).max(8),
+          pauseAfter: z.enum(["none", "micro", "short", "medium", "long"]),
+          breathBefore: z.boolean(),
+          pronunciation: z
+            .array(
+              z.object({
+                text: z.string().max(100),
+                spokenAs: z.string().max(200),
+                pinyin: z.string().max(200).optional(),
+                needsReview: z.boolean(),
+                note: z.string().max(300).optional(),
+              }),
+            )
+            .max(24),
+          action: z.string().max(300).optional(),
+        }),
+      ).max(240),
+    }),
+  ).max(120),
+  warnings: z.array(z.string().max(300)).max(8),
+});
+
 /** LLM 解析用：允许脏 productionGuide，随后由 finalize 归一化 */
 export const scriptDraftOutputLooseSchema = z.object({
   pipeline: scriptDraftPipelineSchema,
@@ -920,6 +1014,7 @@ export const scriptDraftOutputLooseSchema = z.object({
     .optional(),
   viralPlan: scriptViralPlanSchema.optional(),
   scriptReview: scriptReviewSchema.optional(),
+  deliveryGuide: scriptDeliveryGuideSchema.optional(),
   plainText: z.string(),
 });
 
@@ -961,6 +1056,10 @@ export const scriptDraftInputSchema = z.object({
   hotspotSnapshotId: z.string().optional(),
   hotspotClusterId: z.string().optional(),
   hotspotTopicCardId: z.string().optional(),
+  /** 缺省时使用设置中的账号画像默认平台。 */
+  targetPlatforms: z.array(contentPlatformSchema).min(1).max(4).optional(),
+  /** targetPlatforms 包含 other 时的展示名称。 */
+  platformOther: z.string().trim().max(60).optional(),
 });
 
 export const scriptDraftOutputSchema = z.object({
@@ -992,6 +1091,8 @@ export const scriptDraftOutputSchema = z.object({
   viralPlan: scriptViralPlanSchema.optional(),
   /** 第二遍低温质检结果；旧稿可缺省。 */
   scriptReview: scriptReviewSchema.optional(),
+  /** 最终口播的排练与逐词读法攻略；旧稿可缺省。 */
+  deliveryGuide: scriptDeliveryGuideSchema.optional(),
   plainText: z.string(),
 });
 
@@ -1010,6 +1111,7 @@ export type ScriptRewriteMode = z.infer<typeof scriptRewriteModeSchema>;
 export type ScriptProductionGuide = z.infer<typeof scriptProductionGuideSchema>;
 export type ScriptViralPlan = z.infer<typeof scriptViralPlanSchema>;
 export type ScriptReview = z.infer<typeof scriptReviewSchema>;
+export type ScriptDeliveryGuide = z.infer<typeof scriptDeliveryGuideSchema>;
 export type ScriptDraftInput = z.infer<typeof scriptDraftInputSchema>;
 export type ScriptDraftOutput = z.infer<typeof scriptDraftOutputSchema>;
 

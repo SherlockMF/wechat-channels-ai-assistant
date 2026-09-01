@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { applyHotspotEnvironment } from "@/lib/hotspots/config";
 import {
   describeHotspotConfig,
   hotspotConfigFromSettings,
@@ -78,7 +79,42 @@ describe("normalizeRsshubBaseUrl", () => {
   });
 });
 
+describe("applyHotspotEnvironment", () => {
+  it("设置未填写时使用一键启动注入的 RSSHub 地址", () => {
+    expect(
+      applyHotspotEnvironment(
+        { rsshubBaseUrl: "" },
+        { HOTSPOT_RSSHUB_BASE_URL: "http://127.0.0.1:1200/" },
+      ).rsshubBaseUrl,
+    ).toBe("http://127.0.0.1:1200");
+  });
+
+  it("手工设置优先，非法环境地址不生效", () => {
+    expect(
+      applyHotspotEnvironment(
+        { rsshubBaseUrl: "https://rsshub.example.com" },
+        { HOTSPOT_RSSHUB_BASE_URL: "http://127.0.0.1:1200" },
+      ).rsshubBaseUrl,
+    ).toBe("https://rsshub.example.com");
+    expect(
+      applyHotspotEnvironment(
+        { rsshubBaseUrl: "" },
+        { HOTSPOT_RSSHUB_BASE_URL: "javascript:alert(1)" },
+      ).rsshubBaseUrl,
+    ).toBe("");
+  });
+});
+
 describe("normalizeHotspotBlock", () => {
+  it("自定义主题词去空白、忽略大小写去重并保留 emoji", () => {
+    const normalized = normalizeHotspotBlock(
+      settingsWith({
+        customKeywords: ["  AI 教育  ", "ai 教育", "宠物 🐱", "宠物 🐱"],
+      }).providers.hotspots,
+    );
+    expect(normalized.customKeywords).toEqual(["AI 教育", "宠物 🐱"]);
+  });
+
   it("重复源 id 只保留第一条", () => {
     const normalized = normalizeHotspotBlock(
       settingsWith({
@@ -107,6 +143,20 @@ describe("normalizeHotspotBlock", () => {
           .hotspots,
       ).trackIds,
     ).toEqual(["water", "smart_home"]);
+  });
+
+  it("配置自定义主题词时允许 trackIds 为空", () => {
+    const normalized = normalizeHotspotBlock(
+      settingsWith({ trackIds: [], customKeywords: ["AI 教育"] }).providers
+        .hotspots,
+    );
+    expect(normalized.trackIds).toEqual([]);
+    expect(normalized.customKeywords).toEqual(["AI 教育"]);
+    expect(
+      hotspotConfigIssues(
+        settingsWith({ trackIds: [], customKeywords: ["AI 教育"] }),
+      ),
+    ).toEqual([]);
   });
 
   it("归一化 RSSHub 地址并 trim topicModel", () => {
@@ -211,6 +261,24 @@ describe("hotspotConfigFromSettings", () => {
     expect(config.maxItemsPerSource).toBe(30);
     expect(config.rsshubBaseUrl).toBe("http://127.0.0.1:1200");
     expect(config.sources?.map((item) => item.id)).toEqual(["ithome"]);
+  });
+
+  it("自定义主题词和账号定位进入热点运行时配置", () => {
+    const settings = settingsWith({
+      customKeywords: ["  AI 教育 ", "ai 教育", "宠物 🐱"],
+    });
+    settings.contentProfile.positioning = "  面向新手家长的 AI 学习账号  ";
+    settings.contentProfile.themeKeywords = ["AI 亲子教育"];
+
+    const config = hotspotConfigFromSettings(settings);
+
+    expect(config.customKeywords).toEqual([
+      "AI 亲子教育",
+      "AI 教育",
+      "宠物 🐱",
+    ]);
+    expect(config.accountPositioning).toContain("定位：面向新手家长的 AI 学习账号");
+    expect(config.accountPositioning).toContain("受众：");
   });
 });
 

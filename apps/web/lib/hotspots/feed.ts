@@ -1,7 +1,9 @@
+import { lookup } from "node:dns/promises";
 import { XMLParser } from "fast-xml-parser";
 import {
   HOTSPOT_FETCH_BUDGET_MS,
   HOTSPOT_FETCH_CONCURRENCY,
+  HOTSPOT_MAX_REDIRECTS,
   HOTSPOT_SOURCE_MAX_BYTES,
   HOTSPOT_SOURCE_TIMEOUT_MS,
   type HotspotFeedEntry,
@@ -11,6 +13,7 @@ import {
 import {
   canonicalHotspotUrl,
   checkHotspotUrl,
+  isPrivateNetworkAddress,
   type HotspotUrlPolicy,
 } from "@/lib/hotspots/url-policy";
 import { clipResearchText } from "@/lib/viral-research/source-policy";
@@ -247,6 +250,8 @@ export interface HotspotFetchOptions {
   concurrency?: number;
   budgetMs?: number;
   now?: () => Date;
+  /** 测试可注入；生产默认使用系统 DNS，并在每次重定向前重新校验。 */
+  resolveHostname?: (hostname: string) => Promise<string[]>;
 }
 
 function errorMessage(error: unknown): string {
@@ -264,27 +269,66 @@ async function fetchOneSource(
   requestUrl: string,
   options: Required<
     Pick<HotspotFetchOptions, "maxItemsPerSource" | "timeoutMs" | "maxBytes">
-  > & { policy: HotspotUrlPolicy; fetchImpl: typeof fetch; remainingMs: number },
+  > & {
+    policy: HotspotUrlPolicy;
+    fetchImpl: typeof fetch;
+    remainingMs: number;
+    resolveHostname?: (hostname: string) => Promise<string[]>;
+  },
 ): Promise<HotspotFeedEntry[]> {
-  const check = checkHotspotUrl(requestUrl, options.policy);
-  if (!check.ok) throw new Error(check.reason);
   const timeoutMs = Math.max(
     1,
     Math.min(options.timeoutMs, options.remainingMs),
   );
-  const response = await options.fetchImpl(check.url, {
-    method: "GET",
-    headers: { Accept: FEED_ACCEPT_HEADER },
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  // 跟随重定向后必须重新过一遍白名单，否则 302 可以把请求引到内网。
-  if (response.url) {
-    const finalCheck = checkHotspotUrl(response.url, options.policy);
-    if (!finalCheck.ok) {
-      throw new Error(`重定向目标不被允许：${finalCheck.reason}`);
+  const signal = AbortSignal.timeout(timeoutMs);
+  let currentUrl = requestUrl;
+  let response: Response | undefined;
+
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    const check = checkHotspotUrl(currentUrl, options.policy);
+    if (!check.ok) {
+      throw new Error(
+        redirectCount > 0
+          ? `重定向目标不被允许：${check.reason}`
+          : check.reason,
+      );
+    }
+    const checkedUrl = new URL(check.url);
+    const explicitlyAllowedRsshub =
+      options.policy.rsshubOrigin === checkedUrl.origin;
+    if (options.resolveHostname && !explicitlyAllowedRsshub) {
+      const addresses = await options.resolveHostname(checkedUrl.hostname);
+      if (!addresses.length) throw new Error("域名未解析到可用地址");
+      if (addresses.some(isPrivateNetworkAddress)) {
+        throw new Error("域名解析到内网或本机地址，已拒绝抓取");
+      }
+    }
+    response = await options.fetchImpl(check.url, {
+      method: "GET",
+      headers: { Accept: FEED_ACCEPT_HEADER },
+      redirect: "manual",
+      signal,
+    });
+    if (response.url) {
+      const responseCheck = checkHotspotUrl(response.url, options.policy);
+      if (!responseCheck.ok) {
+        throw new Error(`响应地址不被允许：${responseCheck.reason}`);
+      }
+    }
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    if (redirectCount >= HOTSPOT_MAX_REDIRECTS) {
+      throw new Error(`重定向超过 ${HOTSPOT_MAX_REDIRECTS} 次上限`);
+    }
+    const location = response.headers.get("location");
+    if (!location) throw new Error("重定向响应缺少 Location");
+    response.body?.cancel().catch(() => {});
+    try {
+      currentUrl = new URL(location, check.url).toString();
+    } catch {
+      throw new Error("重定向目标无法解析");
     }
   }
+  if (!response) throw new Error("抓取未返回响应");
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -302,6 +346,14 @@ export async function fetchHotspotSources(
 ): Promise<HotspotSourceFetchOutcome[]> {
   const policy = options.policy ?? {};
   const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveHostname =
+    options.resolveHostname ??
+    (options.fetchImpl
+      ? undefined
+      : async (hostname: string) =>
+          (await lookup(hostname, { all: true, verbatim: true })).map(
+            (record) => record.address,
+          ));
   const timeoutMs = options.timeoutMs ?? HOTSPOT_SOURCE_TIMEOUT_MS;
   const maxBytes = options.maxBytes ?? HOTSPOT_SOURCE_MAX_BYTES;
   const concurrency = Math.max(1, options.concurrency ?? HOTSPOT_FETCH_CONCURRENCY);
@@ -353,6 +405,7 @@ export async function fetchHotspotSources(
             timeoutMs,
             maxBytes,
             remainingMs,
+            resolveHostname,
           },
         );
         outcome.entries = entries;

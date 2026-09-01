@@ -1,6 +1,10 @@
 import { hotspotSourceConfigSchema } from "@video-diagnosis/shared-types";
-import type { HotspotRuntimeConfigOverride } from "@/lib/hotspots/types";
+import {
+  normalizeHotspotKeywords,
+  type HotspotRuntimeConfigOverride,
+} from "@/lib/hotspots/types";
 import type { HotspotsProviderSettings, UserSettings } from "@/lib/settings/schema";
+import { normalizeContentProfile } from "@/lib/settings/content-profile";
 import { allTrackIds, trackLabel } from "@/lib/tracks/dictionary";
 
 /** RSSHub 通常自建在本机或内网，因此这里允许 http 与自定义端口。 */
@@ -23,6 +27,7 @@ export function normalizeRsshubBaseUrl(value: string): string {
 export function normalizeHotspotBlock(
   hotspots: HotspotsProviderSettings,
 ): HotspotsProviderSettings {
+  const customKeywords = normalizeHotspotKeywords(hotspots.customKeywords);
   const seenIds = new Set<string>();
   const sources = hotspots.sources.flatMap((source) => {
     const parsed = hotspotSourceConfigSchema.safeParse({
@@ -39,7 +44,10 @@ export function normalizeHotspotBlock(
     rsshubBaseUrl: normalizeRsshubBaseUrl(hotspots.rsshubBaseUrl),
     trackIds: hotspots.trackIds.length
       ? [...new Set(hotspots.trackIds)]
-      : allTrackIds(),
+      : customKeywords.length
+        ? []
+        : allTrackIds(),
+    customKeywords,
     sources,
     topicModel: hotspots.topicModel.trim(),
   };
@@ -50,12 +58,29 @@ export function hotspotConfigFromSettings(
   settings: UserSettings,
 ): HotspotRuntimeConfigOverride {
   const hotspots = normalizeHotspotBlock(settings.providers.hotspots);
+  const profile = normalizeContentProfile(settings.contentProfile);
+  const customKeywords = normalizeHotspotKeywords([
+    ...profile.themeKeywords,
+    ...hotspots.customKeywords,
+  ]);
+  const accountPositioning = [
+    `账号：${profile.accountName}`,
+    `品牌：${profile.brandName}`,
+    `地域：${profile.region}`,
+    `定位：${profile.positioning}`,
+    profile.audiences.length ? `受众：${profile.audiences.join("、")}` : "",
+  ]
+    .filter(Boolean)
+    .join("；")
+    .slice(0, 300);
   return {
     enabled: hotspots.enabled,
     rsshubBaseUrl: hotspots.rsshubBaseUrl,
     freshnessDays: hotspots.freshnessDays,
     maxItemsPerSource: hotspots.maxItemsPerSource,
     trackIds: hotspots.trackIds,
+    customKeywords,
+    accountPositioning,
     ...(hotspots.sources.length ? { sources: hotspots.sources } : {}),
     llm: {
       enabled: true,
@@ -84,7 +109,7 @@ export function hotspotConfigIssues(settings: UserSettings): string[] {
   if (needsRsshub && !hotspots.rsshubBaseUrl) {
     issues.push("启用了 RSSHub 源但未填写 RSSHub 地址，这些源会被跳过");
   }
-  if (!hotspots.trackIds.length) {
+  if (!hotspots.trackIds.length && !hotspots.customKeywords.length) {
     issues.push("未选择任何赛道");
   }
   return issues;
@@ -96,8 +121,13 @@ export function describeHotspotConfig(settings: UserSettings): string {
   const issues = hotspotConfigIssues(settings);
   if (issues.length > 0) return issues.join("；");
   const sourceCount = hotspots.sources.length || "内置默认";
-  const tracks = hotspots.trackIds.map((id) => trackLabel(id)).join("、");
-  return `已就绪（源 ${sourceCount}；近 ${hotspots.freshnessDays} 天；赛道：${tracks}${
+  const tracks = hotspots.trackIds.length
+    ? hotspots.trackIds.map((id) => trackLabel(id)).join("、")
+    : "仅自定义主题";
+  const custom = hotspots.customKeywords.length
+    ? `；主题词：${hotspots.customKeywords.slice(0, 4).join("、")}`
+    : "";
+  return `已就绪（源 ${sourceCount}；近 ${hotspots.freshnessDays} 天；赛道：${tracks}${custom}${
     hotspots.rsshubBaseUrl ? "；已配置 RSSHub" : "；未配置 RSSHub"
   }）`;
 }

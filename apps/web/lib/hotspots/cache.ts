@@ -14,7 +14,7 @@ import {
 const snapshotIdPattern = /^hs-[a-f0-9]{16}-[a-f0-9]{24}$/u;
 const indexLocks = new Map<string, Promise<void>>();
 /** 抓取与聚类口径变化时旧快照不该被复用。 */
-const HOTSPOT_POLICY_VERSION = 1;
+const HOTSPOT_POLICY_VERSION = 3;
 
 interface CacheIndex {
   version: 1;
@@ -29,7 +29,7 @@ export function hotspotStorageRoot(override?: string): string {
     : path.resolve(process.cwd(), ".data", "hotspots");
 }
 
-/** 只有会影响抓取结果的字段进 key；LLM 相关配置不影响热点条目本身。 */
+/** 所有会影响抓取、聚类或选题结果的字段都必须进入 key。 */
 export function hotspotConfigKey(config: HotspotRuntimeConfig): string {
   return createHash("sha256")
     .update(
@@ -39,9 +39,18 @@ export function hotspotConfigKey(config: HotspotRuntimeConfig): string {
         freshnessDays: config.freshnessDays,
         maxItemsPerSource: config.maxItemsPerSource,
         trackIds: [...config.trackIds].sort(),
+        customKeywords: config.customKeywords
+          .map((keyword) => keyword.toLocaleLowerCase())
+          .sort((left, right) => left.localeCompare(right)),
+        accountPositioning: config.accountPositioning,
+        llm: {
+          enabled: config.llm.enabled,
+          model: config.llm.model.trim(),
+        },
         sources: config.sources
           .map((source) => ({
             id: source.id,
+            name: source.name,
             url: source.url,
             kind: source.kind,
             enabled: source.enabled,

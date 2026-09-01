@@ -127,6 +127,20 @@ describe("viral research source policy", () => {
     ).toEqual({ topic: "全屋智能", region: "开远及周边" });
   });
 
+  it("buildResearchQuery carries target platforms and custom platform label", () => {
+    expect(
+      buildResearchQuery({
+        topic: "smart_home",
+        targetPlatforms: ["douyin", "other"],
+        platformOther: "本地生活平台",
+      }),
+    ).toEqual({
+      topic: "全屋智能",
+      targetPlatforms: ["douyin", "other"],
+      platformOther: "本地生活平台",
+    });
+  });
+
   it("snapshotHasExternalItems requires dashscope items and searchPerformed", () => {
     expect(
       snapshotHasExternalItems({
@@ -229,6 +243,10 @@ describe("viral research source policy", () => {
       ],
     );
     expect(accepted).toHaveLength(1);
+    expect(isPreferredVideoPlatformUrl("https://notdouyin.com/video/123")).toBe(false);
+    expect(
+      isPreferredVideoPlatformUrl("https://example.com/path/douyin.com/video/123"),
+    ).toBe(false);
   });
 
   it("清洗 URL、去重，并只限制明确的同作者来源", () => {
@@ -349,7 +367,7 @@ describe("DashScope native search", () => {
 
     const result = await searchDashScope(
       runtimeConfig.dashscope,
-      { topic: "智能灯光" },
+      { topic: "智能灯光", targetPlatforms: ["douyin"] },
       fetchImpl as typeof fetch,
     );
     expect(requestedUrl).toBe(
@@ -368,12 +386,13 @@ describe("DashScope native search", () => {
       messages: Array<{ content: string }>;
     };
     expect(input.messages[0]?.content).toContain(
-      "只检索行业、装修、家庭生活、新品技术等相关内容",
+      "只检索与主题、受众、内容目标和地域直接相关的内容",
     );
     expect(input.messages[0]?.content).toContain(
       "排除时政、灾难、社会争议",
     );
     expect(input.messages[0]?.content).toContain("同赛道关键词扩展检索");
+    expect(input.messages[0]?.content).toContain("目标发布平台：抖音");
     expect(input.messages[0]?.content).toContain("sourceJudgements");
     expect(result.searchPerformed).toBe(true);
     expect(result.items).toHaveLength(3);
@@ -760,6 +779,37 @@ describe("owner-scoped immutable cache", () => {
     );
   });
 
+  it("缓存 key 随目标平台、新鲜度和个性化上下文变化而失效", () => {
+    const base = { topic: "智能家居" };
+    const douyin = { ...base, targetPlatforms: ["douyin" as const] };
+    const bilibili = { ...base, targetPlatforms: ["bilibili" as const] };
+    expect(viralResearchQueryKey(douyin, "qwen-plus")).not.toBe(
+      viralResearchQueryKey(bilibili, "qwen-plus"),
+    );
+    expect(
+      viralResearchQueryKey(base, "qwen-plus", {
+        freshnessDays: 7,
+        contextFingerprint: "context-a",
+      }),
+    ).not.toBe(
+      viralResearchQueryKey(base, "qwen-plus", {
+        freshnessDays: 30,
+        contextFingerprint: "context-a",
+      }),
+    );
+    expect(
+      viralResearchQueryKey(base, "qwen-plus", {
+        freshnessDays: 7,
+        contextFingerprint: "context-a",
+      }),
+    ).not.toBe(
+      viralResearchQueryKey(base, "qwen-plus", {
+        freshnessDays: 7,
+        contextFingerprint: "context-b",
+      }),
+    );
+  });
+
   it("强刷只移动索引，旧快照仍可读", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-research-"));
     const query = { topic: "智能家居" };
@@ -906,6 +956,192 @@ describe("owner history percentile", () => {
 });
 
 describe("viral research service", () => {
+  it("filters future and expired web sources, then ranks fresh evidence before undated evidence", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-freshness-"));
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output: {
+            search_info: {
+              search_results: [
+                {
+                  index: 1,
+                  title: "智能家居无日期案例",
+                  url: "https://example.com/unknown",
+                },
+                {
+                  index: 2,
+                  title: "智能家居近期案例",
+                  url: "https://example.com/fresh",
+                  published_at: "2026-08-30T00:00:00.000Z",
+                },
+                {
+                  index: 3,
+                  title: "智能家居过期案例",
+                  url: "https://example.com/old",
+                  published_at: "2026-01-01T00:00:00.000Z",
+                },
+                {
+                  index: 4,
+                  title: "智能家居未来案例",
+                  url: "https://example.com/future",
+                  published_at: "2026-09-02T00:00:00.000Z",
+                },
+              ],
+            },
+            choices: [{ message: { content: "{}" } }],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" }, forceRefresh: true },
+      {
+        config: { dashscope: { ...runtimeConfig.dashscope, freshnessDays: 30 } },
+        fetchImpl: fetchImpl as typeof fetch,
+        storageRoot: tempDir,
+        now: () => new Date("2026-08-31T00:00:00.000Z"),
+        ownedHistory: [],
+      },
+    );
+    expect(result.snapshot.items.map((item) => item.url)).toEqual([
+      "https://example.com/fresh",
+      "https://example.com/unknown",
+    ]);
+  });
+
+  it("invalidates a live cache entry when owner history or manual samples change", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-context-cache-"));
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output: {
+            search_info: {
+              search_results: [
+                {
+                  index: 1,
+                  title: "智能家居联动实拍",
+                  url: "https://example.com/context",
+                },
+              ],
+            },
+            choices: [{ message: { content: "{}" } }],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const sample = {
+      id: "33333333-3333-4333-8333-333333333333",
+      ownerId: "owner-a",
+      url: "https://example.com/sample",
+      title: "智能家居样本",
+      platform: "douyin" as const,
+      metricsSource: "manual" as const,
+      visibleMetrics: { likes: 100 },
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
+    };
+    const baseOptions = {
+      config: runtimeConfig,
+      fetchImpl: fetchImpl as typeof fetch,
+      storageRoot: tempDir,
+      now: () => new Date("2026-08-31T00:00:00.000Z"),
+      ownedHistory: [
+        record("h1", "智能家居", { views: 100, completionRate: 50 }),
+      ],
+      viralSamples: [sample],
+    };
+    const first = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      baseOptions,
+    );
+    const second = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      baseOptions,
+    );
+    const changed = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" } },
+      {
+        ...baseOptions,
+        viralSamples: [
+          { ...sample, visibleMetrics: { likes: 200 }, updatedAt: "2026-08-31T00:00:00.000Z" },
+        ],
+      },
+    );
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(true);
+    expect(changed.cacheHit).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps every fallback topic-card source id inside the final snapshot items", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-card-integrity-"));
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          output: {
+            search_info: {
+              search_results: Array.from({ length: 8 }, (_, index) => ({
+                index: index + 1,
+                title:
+                  index >= 5
+                    ? `智能家居末尾证明结构 ${index + 1}`
+                    : `智能家居普通案例 ${index + 1}`,
+                url: `https://example.com/card-${index + 1}`,
+              })),
+            },
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    commonPatterns: ["末尾证明结构"],
+                    topicCards: [],
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const samples = Array.from({ length: 5 }, (_, index) => ({
+      id: `44444444-4444-4444-8444-44444444444${index}`,
+      ownerId: "owner-a",
+      url: `https://sample.example.com/${index}`,
+      title: `智能家居人工样本 ${index}`,
+      platform: "douyin" as const,
+      metricsSource: "manual" as const,
+      visibleMetrics: { likes: 100 + index },
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
+    }));
+    const result = await researchViralVideos(
+      "owner-a",
+      { query: { topic: "智能家居" }, forceRefresh: true },
+      {
+        config: runtimeConfig,
+        fetchImpl: fetchImpl as typeof fetch,
+        storageRoot: tempDir,
+        now: () => new Date("2026-08-31T00:00:00.000Z"),
+        ownedHistory: [],
+        viralSamples: samples,
+      },
+    );
+    const itemIds = new Set(result.snapshot.items.map((item) => item.id));
+    expect(result.snapshot.topicCards.length).toBeGreaterThan(0);
+    expect(
+      result.snapshot.topicCards.every((card) =>
+        card.sourceIds.every((sourceId) => itemIds.has(sourceId)),
+      ),
+    ).toBe(true);
+  });
   it("模型完全无法解析时不生成选题卡，只留人话局限", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "viral-fallback-"));
     const fetchImpl = vi.fn(async () =>

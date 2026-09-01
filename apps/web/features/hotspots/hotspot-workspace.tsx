@@ -32,6 +32,18 @@ const SOURCE_STATUS_LABELS = {
   skipped: "跳过",
 } as const;
 
+const CONFIDENCE_LABELS = {
+  low: "低置信度",
+  medium: "中置信度",
+  high: "高置信度",
+} as const;
+
+const CONFIDENCE_TONES = {
+  low: "warning",
+  medium: "info",
+  high: "success",
+} as const;
+
 function formatFetchedAt(value: string): string {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return value;
@@ -326,6 +338,9 @@ export function HotspotWorkspace() {
                           {cluster.headline}
                         </span>
                         <Badge tone="neutral">热度 {cluster.heat}</Badge>
+                        <Badge tone={CONFIDENCE_TONES[cluster.confidence]}>
+                          {CONFIDENCE_LABELS[cluster.confidence]}
+                        </Badge>
                         <Badge tone="neutral">{cluster.sourceCount} 源</Badge>
                       </div>
                       <p className="mt-1 text-xs text-[#66736c]">
@@ -349,6 +364,15 @@ export function HotspotWorkspace() {
                     </h3>
                     <p className="mt-1 text-xs text-[#66736c]">
                       {clusterItems.length} 条相关报道
+                    </p>
+                    <p className="mt-1 text-xs text-[#66736c]">
+                      来源分 {selectedCluster.scoreBreakdown.sourceDiversity} ·
+                      条目分 {selectedCluster.scoreBreakdown.itemVolume} · 新鲜度分{" "}
+                      {selectedCluster.scoreBreakdown.recency} · 有日期{" "}
+                      {Math.round(
+                        selectedCluster.scoreBreakdown.dateConfidence * 100,
+                      )}
+                      %
                     </p>
                   </div>
                   <Button
@@ -389,6 +413,11 @@ export function HotspotWorkspace() {
                       {item.summary ? (
                         <p className="mt-2 text-xs leading-5 text-[#52615a]">
                           {item.summary}
+                        </p>
+                      ) : null}
+                      {item.matchedTerms.length ? (
+                        <p className="mt-2 text-xs text-[#66736c]">
+                          命中词：{item.matchedTerms.join("、")}
                         </p>
                       ) : null}
                     </li>

@@ -12,6 +12,7 @@ import type {
 import { viralResearchSnapshotSchema } from "@video-diagnosis/shared-types";
 import { Badge, Button } from "@/components/ui";
 import { buildResearchQuery, researchEvidenceBadgeLabel, snapshotHasExternalItems } from "@/lib/viral-research/query";
+import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
 import { ViralSampleForm } from "@/features/viral-research/viral-sample-form";
 
 const VISIBLE_METRIC_LABELS: Record<string, string> = {
@@ -41,6 +42,28 @@ const EVIDENCE_STRENGTH_LABELS = {
   weak: "证据较弱",
 } as const;
 
+const ITEM_EVIDENCE_LABELS: Record<ViralResearchItem["evidenceLevel"], string> = {
+  verified_metric: "人工核验指标",
+  platform_page: "平台页面",
+  media_article: "行业媒体",
+  public_source: "公开网页",
+  account_history: "账号历史实绩",
+};
+
+const ACCOUNT_FIT_LABELS = {
+  high: "账号适配高",
+  medium: "账号适配中",
+  low: "账号适配低",
+  unknown: "账号适配待判断",
+} as const;
+
+function formatResearchDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toLocaleDateString("zh-CN");
+}
+
 const SEARCH_STEP_MESSAGE = "正在检索公开来源…";
 const ANALYZE_STEP_MESSAGE = "正在整理选题角度…";
 
@@ -59,6 +82,7 @@ function ResearchEvidenceCard({
         `${VISIBLE_METRIC_LABELS[key] ?? key} ${String(value)}`,
     )
     .join(" · ");
+  const publishedAt = formatResearchDate(item.publishedAt);
   return (
     <div
       className={`rounded-xl border p-3 ${
@@ -89,8 +113,25 @@ function ResearchEvidenceCard({
           <span className="mt-1 block text-xs text-[#7a8680]">
             {item.site ?? RESEARCH_SOURCE_LABELS[item.sourceType] ?? "来源未标注"}
           </span>
+          <span className="mt-1 flex flex-wrap gap-1.5 text-xs text-[#52615a]">
+            <span>{ITEM_EVIDENCE_LABELS[item.evidenceLevel]}</span>
+            {publishedAt ? <span>· {publishedAt}</span> : null}
+            {item.accountFit ? (
+              <span>· {ACCOUNT_FIT_LABELS[item.accountFit.level]}</span>
+            ) : null}
+          </span>
           {metrics ? (
             <p className="mt-1 text-xs text-[#52615a]">{metrics}</p>
+          ) : null}
+          {item.relevanceReasons.length ? (
+            <p className="mt-1 text-xs leading-5 text-[#66736c]">
+              入选依据：{item.relevanceReasons.slice(0, 2).join("；")}
+            </p>
+          ) : null}
+          {item.accountFit?.reasons.length ? (
+            <p className="mt-1 text-xs leading-5 text-[#66736c]">
+              适配依据：{item.accountFit.reasons.slice(0, 2).join("；")}
+            </p>
           ) : null}
         </div>
       </div>
@@ -100,9 +141,7 @@ function ResearchEvidenceCard({
 
 function resolveExistingScript(draft: ScriptDraft): string {
   return (
-    draft.editedPlainText?.trim() ||
-    draft.output?.script?.trim() ||
-    draft.output?.plainText?.trim() ||
+    editedSpokenBody(draft.editedPlainText, draft.output) ||
     draft.input.existingScript?.trim() ||
     ""
   );
@@ -262,6 +301,10 @@ export function ScriptResearchPanel({
             topic: draft.topic,
             topicOther: draft.topicOther,
             idea: draft.input.idea,
+            audience: draft.input.audience,
+            contentGoal: draft.input.contentGoal,
+            targetPlatforms: draft.input.targetPlatforms,
+            platformOther: draft.input.platformOther,
           }),
           forceRefresh,
         }),

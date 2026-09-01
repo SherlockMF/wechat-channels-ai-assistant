@@ -52,6 +52,8 @@ import {
   sanitizeScriptInput,
 } from "@/lib/script-workbench/production-guide";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
+import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
+import { loadUserSettings } from "@/lib/settings/store";
 import {
   findScriptReferences,
   formatReferencesForPrompt,
@@ -1415,6 +1417,7 @@ export class LocalRepository {
       });
     }
     const input = sanitizeScriptInput(params.input);
+    const settings = await loadUserSettings();
     const state = await readState();
     const refs = findScriptReferences(
       recordsOwnedBy(state.records, state.imports, ownerId),
@@ -1468,6 +1471,7 @@ export class LocalRepository {
       hotspotItems:
         hotspotSnapshot?.items.filter((item) => hotspotItemIds.has(item.id)) ??
         [],
+      contentProfile: settings.contentProfile,
     };
     let output = await provider.generate(request);
     output = finalizeScriptOutput(request, {
@@ -1525,8 +1529,7 @@ export class LocalRepository {
       input: {
         ...existing.input,
         existingScript:
-          existing.editedPlainText?.trim() ||
-          existing.output?.script?.trim() ||
+          editedSpokenBody(existing.editedPlainText, existing.output) ||
           existing.input.existingScript,
       },
       title: existing.title,

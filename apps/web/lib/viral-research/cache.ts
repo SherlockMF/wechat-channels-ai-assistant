@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  type ImportedVideoRecord,
+  type ViralSample,
   viralResearchSnapshotSchema,
   type ViralResearchSnapshot,
 } from "@video-diagnosis/shared-types";
@@ -36,19 +38,63 @@ function normalizedQuery(query: ViralResearchQuery) {
     audience: query.audience?.trim() || undefined,
     contentGoal: query.contentGoal?.trim() || undefined,
     region: query.region?.trim() || undefined,
+    targetPlatforms: query.targetPlatforms?.length
+      ? [...new Set(query.targetPlatforms)].sort()
+      : undefined,
+    platformOther: query.targetPlatforms?.includes("other")
+      ? query.platformOther?.trim() || undefined
+      : undefined,
   };
+}
+
+export interface ViralResearchCacheContext {
+  freshnessDays?: number;
+  contextFingerprint?: string;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalize(item)]),
+  );
+}
+
+/** 只纳入会影响筛选、账号适配或展示的 owner 私有上下文。 */
+export function viralResearchContextFingerprint(
+  records: readonly ImportedVideoRecord[],
+  samples: readonly ViralSample[],
+): string {
+  const orderedRecords = [...records].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  const orderedSamples = [...samples].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        canonicalize({ records: orderedRecords, samples: orderedSamples }),
+      ),
+    )
+    .digest("hex");
 }
 
 /** model 参与缓存维度：同主题换模型不复用旧结果。 */
 export function viralResearchQueryKey(
   query: ViralResearchQuery,
   model: string,
+  context: ViralResearchCacheContext = {},
 ): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
         policyVersion: RESEARCH_POLICY_VERSION,
         model: model.trim().toLowerCase(),
+        freshnessDays: context.freshnessDays,
+        contextFingerprint: context.contextFingerprint?.trim() || undefined,
         query: normalizedQuery(query),
       }),
     )
@@ -177,12 +223,20 @@ export async function readViralResearchSnapshot(
 export async function readCachedViralResearchSnapshot(
   ownerId: string,
   query: ViralResearchQuery,
-  options: { storageRoot?: string; model: string },
+  options: {
+    storageRoot?: string;
+    model: string;
+    freshnessDays?: number;
+    contextFingerprint?: string;
+  },
 ): Promise<ViralResearchSnapshot | null> {
   const owner = normalizeOwnerId(ownerId);
   const directory = ownerDirectory(owner, options.storageRoot);
   const indexPath = path.join(directory, "cache-index.json");
-  const queryKey = viralResearchQueryKey(query, options.model);
+  const queryKey = viralResearchQueryKey(query, options.model, {
+    freshnessDays: options.freshnessDays,
+    contextFingerprint: options.contextFingerprint,
+  });
   return withIndexLock(indexPath, async () => {
     const index = await readIndex(indexPath);
     const entry = index.entries[queryKey];
@@ -241,6 +295,8 @@ export async function writeViralResearchSnapshot(
     storageRoot?: string;
     cacheQuery?: ViralResearchQuery;
     cacheModel?: string;
+    cacheFreshnessDays?: number;
+    cacheContextFingerprint?: string;
   } = {},
 ): Promise<ViralResearchSnapshot> {
   const parsed = viralResearchSnapshotSchema.parse(snapshot);
@@ -272,6 +328,10 @@ export async function writeViralResearchSnapshot(
     const queryKey = viralResearchQueryKey(
       options.cacheQuery,
       options.cacheModel,
+      {
+        freshnessDays: options.cacheFreshnessDays,
+        contextFingerprint: options.cacheContextFingerprint,
+      },
     );
     await withIndexLock(indexPath, async () => {
       const index = await readIndex(indexPath);

@@ -71,7 +71,7 @@ export function HotspotSection({
           <h3 className="text-sm font-bold text-ink">研究热点</h3>
           <p className="mt-1 text-xs leading-5 text-[#78857e]">
             从多个新闻源与热榜抓取近期条目，按赛道过滤后给出选题建议。官方 RSS
-            无需额外部署；微博/知乎/抖音等热搜榜需自建 RSSHub 并在下方填写地址。
+            无需额外部署；一键启动会自动接入本机 RSSHub，用于 36氪、微博、知乎、抖音等来源。
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -104,7 +104,7 @@ export function HotspotSection({
             <span className="text-xs text-coral">{rsshubHint}</span>
           ) : (
             <span className="text-xs text-[#78857e]">
-              留空则跳过所有 RSSHub 源
+              一键启动检测到本机 RSSHub 后可留空；手工填写的地址优先
             </span>
           )}
         </label>
@@ -143,6 +143,25 @@ export function HotspotSection({
               })
             }
           />
+        </label>
+
+        <label className="block space-y-1.5 md:col-span-2">
+          <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+            自定义主题词
+          </span>
+          <textarea
+            className="min-h-24 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine"
+            value={hotspots.customKeywords.join("\n")}
+            onChange={(event) =>
+              updateHotspots({
+                customKeywords: event.target.value.split(/\r?\n|[,，]/u),
+              })
+            }
+            placeholder={"AI 教育\n亲子阅读\n宠物健康"}
+          />
+          <span className="text-xs text-[#78857e]">
+            每行或逗号分隔一个主题；会与账号定位一起参与热点筛选和选题生成。
+          </span>
         </label>
 
         <label className="block space-y-1.5 md:col-span-2">
@@ -194,8 +213,9 @@ export function HotspotSection({
             </label>
           ))}
         </div>
-        {hotspots.trackIds.length === 0 ? (
-          <p className="text-xs text-coral">至少选择一个赛道</p>
+        {hotspots.trackIds.length === 0 &&
+        !hotspots.customKeywords.some((keyword) => keyword.trim()) ? (
+          <p className="text-xs text-coral">至少选择一个赛道或填写自定义主题词</p>
         ) : null}
       </div>
 

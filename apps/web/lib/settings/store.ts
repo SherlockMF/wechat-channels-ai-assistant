@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeHotspotBlock } from "@/lib/settings/hotspot-config";
+import { normalizeContentProfile } from "@/lib/settings/content-profile";
 import {
   defaultUserSettings,
   userSettingsSchema,
@@ -29,6 +30,7 @@ function parseSettingsJson(raw: string): UserSettings {
   const parsed = userSettingsSchema.parse(JSON.parse(raw) as unknown);
   return {
     ...parsed,
+    contentProfile: normalizeContentProfile(parsed.contentProfile),
     providers: normalizeProviders(parsed.providers),
   };
 }
@@ -55,6 +57,7 @@ export async function saveUserSettings(
 ): Promise<UserSettings> {
   const parsed = userSettingsSchema.parse({
     ...next,
+    contentProfile: normalizeContentProfile(next.contentProfile),
     providers: normalizeProviders(next.providers),
   });
   const filePath = settingsPath();
@@ -111,6 +114,7 @@ export function mergeProviderUpdate(
   return userSettingsSchema.parse({
     setupCompleted: patch.setupCompleted,
     dismissWizard: patch.dismissWizard,
+    contentProfile: normalizeContentProfile(patch.contentProfile),
     providers: normalizeProviders({
       dashscopeApiKey: keepKey(
         patch.providers.dashscopeApiKey,

@@ -48,6 +48,8 @@ import {
   sanitizeScriptInput,
 } from "@/lib/script-workbench/production-guide";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
+import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
+import { loadUserSettings } from "@/lib/settings/store";
 import {
   findScriptReferences,
   formatReferencesForPrompt,
@@ -917,6 +919,7 @@ class SitesRepository extends CloudRepository {
       throw Object.assign(new Error("该制作形态需要选择业务主题"), { status: 400 });
     }
     const input = sanitizeScriptInput(params.input);
+    const settings = await loadUserSettings();
     const state = await readState();
     const refs = findScriptReferences(
       recordsOwnedBy(state.records, state.imports, ownerId),
@@ -932,6 +935,7 @@ class SitesRepository extends CloudRepository {
       processKinds: params.processKinds ?? [],
       input,
       referenceHints: formatReferencesForPrompt(refs),
+      contentProfile: settings.contentProfile,
     };
     let output = await provider.generate(request);
     output = finalizeScriptOutput(request, {
@@ -986,8 +990,7 @@ class SitesRepository extends CloudRepository {
       input: {
         ...existing.input,
         existingScript:
-          existing.editedPlainText?.trim() ||
-          existing.output?.script?.trim() ||
+          editedSpokenBody(existing.editedPlainText, existing.output) ||
           existing.input.existingScript,
       },
       title: existing.title,

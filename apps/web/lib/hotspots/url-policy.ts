@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { sanitizeResearchUrl } from "@/lib/viral-research/source-policy";
 
 /** sanitizeResearchUrl 已处理 utm_/spm 等，这里补齐资讯站常见的会话与推荐参数。 */
@@ -26,6 +27,46 @@ const PRIVATE_HOST_SUFFIX =
 export interface HotspotUrlPolicy {
   /** 显式配置的 RSSHub origin：唯一允许 http、内网地址与非默认端口的目标。 */
   rsshubOrigin?: string;
+}
+
+function privateIpv4(address: string): boolean {
+  const parts = address.split(".").map(Number);
+  if (
+    parts.length !== 4 ||
+    parts.some(
+      (part) => !Number.isInteger(part) || part < 0 || part > 255,
+    )
+  ) {
+    return true;
+  }
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a >= 224
+  );
+}
+
+/** DNS 解析后再检查地址，阻止公网域名解析到本机、内网或链路本地地址。 */
+export function isPrivateNetworkAddress(rawAddress: string): boolean {
+  const address = rawAddress.trim().toLowerCase().replace(/^\[|\]$/gu, "");
+  const family = isIP(address);
+  if (family === 4) return privateIpv4(address);
+  if (family !== 6) return true;
+  const mapped = address.match(/^(?:::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/u)?.[1];
+  if (mapped) return privateIpv4(mapped);
+  return (
+    address === "::" ||
+    address === "::1" ||
+    address.startsWith("fc") ||
+    address.startsWith("fd") ||
+    /^fe[89ab]/u.test(address)
+  );
 }
 
 export function createHotspotUrlPolicy(

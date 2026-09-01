@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { repository, requestOwnerId } from "@/lib/data/repository";
+import { loadUserSettings } from "@/lib/settings/store";
 import { loadViralSamplesForResearch } from "@/lib/viral-research/samples";
 import { viralResearchRequestSchema } from "@/lib/viral-research/types";
 
@@ -23,8 +24,29 @@ async function runResearch(request: Request, body: unknown) {
   }
   const ownerId = requestOwnerId(request);
   const input = viralResearchRequestSchema.parse(body);
+  const profile = (await loadUserSettings()).contentProfile;
+  const enrichedInput = {
+    ...input,
+    query: {
+      ...input.query,
+      audience:
+        input.query.audience || profile.audiences.join("、").slice(0, 120),
+      contentGoal:
+        input.query.contentGoal || profile.positioning.slice(0, 120),
+      region: input.query.region || profile.region.slice(0, 120),
+      targetPlatforms:
+        input.query.targetPlatforms?.length
+          ? input.query.targetPlatforms
+          : profile.defaultPlatforms,
+      platformOther:
+        input.query.platformOther ||
+        (profile.defaultPlatforms.includes("other")
+          ? profile.otherPlatformName || undefined
+          : undefined),
+    },
+  };
   const { researchViralVideos } = await import("@/lib/viral-research/service");
-  const result = await researchViralVideos(ownerId, input, {
+  const result = await researchViralVideos(ownerId, enrichedInput, {
     loadOwnedHistory: () => repository.listOwnerVideoRecords(ownerId),
     loadViralSamples: () =>
       loadViralSamplesForResearch(() => repository.listViralSamples(ownerId)),
@@ -65,6 +87,10 @@ export async function GET(request: Request) {
     );
   }
   const optional = (key: string) => parameters.get(key)?.trim() || undefined;
+  const targetPlatforms = optional("targetPlatforms")
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   try {
     return await runResearch(request, {
       query: {
@@ -73,6 +99,8 @@ export async function GET(request: Request) {
         audience: optional("audience"),
         contentGoal: optional("contentGoal"),
         region: optional("region"),
+        targetPlatforms,
+        platformOther: optional("platformOther"),
       },
     });
   } catch (error) {

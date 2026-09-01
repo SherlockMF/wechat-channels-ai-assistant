@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ContentPlatform,
   ScriptDraftInput,
   ScriptDraft,
   ScriptDraftFormat,
@@ -28,6 +29,8 @@ import {
   topicLabel,
   topicRequired,
 } from "@/lib/script-workbench/catalog";
+import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
+import { PLATFORM_CATALOG } from "@/lib/platforms/catalog";
 
 const TONE_OPTIONS = [
   { value: "casual", label: "口语" },
@@ -260,9 +263,11 @@ export function ScriptCreateForm({
   const [internalNote, setInternalNote] = useState("");
   const [shootStatus, setShootStatus] = useState<"shot" | "unshot">("unshot");
   const [materialNotes, setMaterialNotes] = useState("");
-  const [audience, setAudience] = useState(
-    "开远及周边正在装修或改善居住体验的人群",
-  );
+  const [audience, setAudience] = useState("");
+  const [targetPlatforms, setTargetPlatforms] = useState<ContentPlatform[]>([
+    "weixin_channels",
+  ]);
+  const [platformOther, setPlatformOther] = useState("");
   const [contentGoal, setContentGoal] = useState<
     NonNullable<ScriptDraftInput["contentGoal"]>
   >("lead_generation");
@@ -287,8 +292,8 @@ export function ScriptCreateForm({
     return [
       {
         key: "verified",
-        title: "带公开指标的外部内容",
-        description: "页面或检索结果包含播放、点赞、评论、转发、收藏、推荐等可复核数据。",
+        title: "人工核验指标样本",
+        description: "由你手动录入并确认至少一项互动指标；系统不会从搜索结果猜测数据。",
         items: research.items.filter(
           (item) =>
             item.sourceType !== "owned_history" &&
@@ -315,6 +320,31 @@ export function ScriptCreateForm({
       },
     ];
   }, [research]);
+
+  useEffect(() => {
+    if (researchSourceScriptId) return;
+    const controller = new AbortController();
+    void fetch("/api/settings/providers", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then((body) => {
+        const profile = body?.settings?.contentProfile;
+        if (!profile) return;
+        if (Array.isArray(profile.defaultPlatforms) && profile.defaultPlatforms.length) {
+          setTargetPlatforms(profile.defaultPlatforms as ContentPlatform[]);
+        }
+        if (typeof profile.otherPlatformName === "string") {
+          setPlatformOther(profile.otherPlatformName);
+        }
+        if (Array.isArray(profile.audiences) && profile.audiences.length) {
+          setAudience((current) => current || profile.audiences.join("、"));
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [researchSourceScriptId]);
 
   const ideaPlaceholder = useMemo(() => {
     switch (resolvedFormat) {
@@ -362,9 +392,7 @@ export function ScriptCreateForm({
         setProcessKinds(draft.processKinds);
         setIdea(input.idea);
         setExistingScript(
-          draft.editedPlainText?.trim() ||
-            draft.output?.script?.trim() ||
-            draft.output?.plainText?.trim() ||
+          editedSpokenBody(draft.editedPlainText, draft.output) ||
             input.existingScript ||
             "",
         );
@@ -389,6 +417,10 @@ export function ScriptCreateForm({
         setShootStatus(input.shootStatus || "unshot");
         setMaterialNotes(input.materialNotes || "");
         setAudience(input.audience || "");
+        if (input.targetPlatforms?.length) {
+          setTargetPlatforms(input.targetPlatforms);
+        }
+        setPlatformOther(input.platformOther || "");
         setContentGoal(input.contentGoal || "lead_generation");
         setCtaGoal(input.ctaGoal || "");
         setClaimEvidence(input.claimEvidence || "");
@@ -479,6 +511,10 @@ export function ScriptCreateForm({
             topic: resolved.topicPayload.topic,
             topicOther: resolved.topicPayload.topicOther,
             idea: idea.trim(),
+            audience: audience.trim() || undefined,
+            contentGoal,
+            targetPlatforms,
+            platformOther: platformOther.trim() || undefined,
           }),
           forceRefresh,
         }),
@@ -541,6 +577,10 @@ export function ScriptCreateForm({
     if (researchBranch ? step !== 3 : step !== 1) return;
     const resolved = validateCore();
     if (!resolved) return;
+    if (targetPlatforms.includes("other") && !platformOther.trim()) {
+      setError("选择「其他平台」时请填写平台名称");
+      return;
+    }
     const { formatPayload, topicPayload, tonePayload } = resolved;
     setBusy(true);
     try {
@@ -549,7 +589,11 @@ export function ScriptCreateForm({
         shootStatus,
         contentGoal,
         rewriteMode,
+        targetPlatforms,
       };
+      if (targetPlatforms.includes("other") && platformOther.trim()) {
+        input.platformOther = platformOther.trim();
+      }
       if (audience.trim()) input.audience = audience.trim();
       if (ctaGoal.trim()) input.ctaGoal = ctaGoal.trim();
       if (claimEvidence.trim()) input.claimEvidence = claimEvidence.trim();
@@ -860,12 +904,56 @@ export function ScriptCreateForm({
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
+            <fieldset className="space-y-2 md:col-span-2">
+              <legend className="text-xs font-semibold text-[#52615a]">
+                目标平台（最多 4 个）
+              </legend>
+              <div className="flex flex-wrap gap-3 rounded-lg border border-line bg-white p-3">
+                {PLATFORM_CATALOG.map((platform) => {
+                  const selected = targetPlatforms.includes(platform.id);
+                  return (
+                    <label key={platform.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={
+                          (!selected && targetPlatforms.length >= 4) ||
+                          (selected && targetPlatforms.length === 1)
+                        }
+                        onChange={(event) =>
+                          setTargetPlatforms((current) =>
+                            event.target.checked
+                              ? [...current, platform.id]
+                              : current.filter((item) => item !== platform.id),
+                          )
+                        }
+                      />
+                      {platform.label}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-xs font-normal text-[#88948d]">
+                用于标题、节奏、CTA 与检索偏好；当前不包含自动发布或平台指标同步。
+              </p>
+            </fieldset>
+            {targetPlatforms.includes("other") ? (
+              <label className="grid gap-1 text-xs font-semibold text-[#52615a] md:col-span-2">
+                其他平台名称
+                <input
+                  className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                  value={platformOther}
+                  maxLength={60}
+                  onChange={(event) => setPlatformOther(event.target.value)}
+                />
+              </label>
+            ) : null}
             <label className="grid gap-1 text-xs font-semibold text-[#52615a]">
               目标受众（可选）
               <input
                 className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 value={audience}
-                placeholder="例如：正在装修、重视居住体验的开远家庭"
+                placeholder="例如：正在装修、重视居住体验的本地家庭"
                 onChange={(event) => setAudience(event.target.value)}
               />
             </label>
@@ -1167,18 +1255,18 @@ export function ScriptCreateForm({
               <div className="rounded-xl border border-line bg-fog p-4 text-xs leading-5 text-[#52615a]">
                 <p className="font-semibold text-ink">当前研究完成度</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Badge tone={research.items.filter((item) => item.sourceType !== "owned_history").length >= 3 ? "success" : "warning"}>
-                    主题相关外部来源 {research.items.filter((item) => item.sourceType !== "owned_history").length} / 3
+                  <Badge tone={research.items.some((item) => item.sourceType !== "owned_history") ? "success" : "warning"}>
+                    主题相关外部来源 {research.items.filter((item) => item.sourceType !== "owned_history").length} 条
                   </Badge>
                   <Badge tone={research.commonPatterns.length ? "success" : "warning"}>
                     已归纳共性 {research.commonPatterns.length} 条
                   </Badge>
                   <Badge tone={research.items.some((item) => item.evidenceLevel === "verified_metric") ? "success" : "warning"}>
-                    带公开指标来源 {research.items.filter((item) => item.evidenceLevel === "verified_metric").length} 条
+                    人工核验指标来源 {research.items.filter((item) => item.evidenceLevel === "verified_metric").length} 条
                   </Badge>
                 </div>
                 <p className="mt-2">
-                  前两项达到后可以生成资料型研究角度；只有角度引用的至少 3 条外部来源都带公开指标时，才可视为外部热度已验证。
+                  至少 1 条主题相关来源即可生成有出处的研究角度；人工核验指标只代表你录入的样本，不代表整个平台热度已验证。
                 </p>
               </div>
 
@@ -1187,7 +1275,7 @@ export function ScriptCreateForm({
                   <div>
                     <p className="text-sm font-semibold">选择一个研究角度</p>
                     <p className="mt-1 text-xs text-[#66736c]">
-                      合格角度必须引用至少 3 条主题相关外部来源。标题以“资料候选”开头时，表示结构有资料依据但外部热度尚未验证。
+                      每个角度至少引用 1 条最终快照中的真实来源；来源越多、证据等级越高，结论越值得优先验证。
                     </p>
                   </div>
                   <div className="grid gap-3 lg:grid-cols-3">
@@ -1279,7 +1367,7 @@ export function ScriptCreateForm({
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-                  生成门槛：至少 3 条主题相关外部来源，并且模型能从这些来源归纳出明确共性。若要称为“外部热度已验证”，引用来源还必须带有可复核的公开播放或互动指标。本次尚未达到角度生成门槛。
+                  本次没有生成可引用的研究角度。请调整主题或平台后重新检索，也可先录入人工样本；系统不会用无来源结论补造角度。
                 </div>
               )}
 

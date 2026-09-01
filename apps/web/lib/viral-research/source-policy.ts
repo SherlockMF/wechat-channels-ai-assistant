@@ -107,12 +107,38 @@ function queryTerms(query: ViralResearchQuery): string[] {
   return [...terms].filter(Boolean);
 }
 
-const VIDEO_PLATFORM_URL_PATTERN =
-  /(?:douyin\.com|iesdouyin\.com|xiaohongshu\.com|xhslink\.com|bilibili\.com|b23\.tv|kuaishou\.com|weixin\.qq\.com|channels\.weixin\.qq\.com)/iu;
+const VIDEO_PLATFORM_HOSTS = [
+  "douyin.com",
+  "iesdouyin.com",
+  "xiaohongshu.com",
+  "xhslink.com",
+  "bilibili.com",
+  "b23.tv",
+  "kuaishou.com",
+  "weixin.qq.com",
+  "channels.weixin.qq.com",
+  "youtube.com",
+  "youtu.be",
+  "tiktok.com",
+] as const;
+
+export function urlHostnameMatches(
+  rawUrl: string | undefined,
+  allowedHosts: readonly string[],
+): boolean {
+  if (!rawUrl) return false;
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase().replace(/\.$/u, "");
+    return allowedHosts.some(
+      (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function isPreferredVideoPlatformUrl(url: string | undefined): boolean {
-  if (!url) return false;
-  return VIDEO_PLATFORM_URL_PATTERN.test(url);
+  return urlHostnameMatches(url, VIDEO_PLATFORM_HOSTS);
 }
 
 /** 模型对单条来源的打标；缺席时才回落到赛道词典。 */
@@ -130,7 +156,11 @@ function dictionaryRelevance(
   query: ViralResearchQuery,
   item: ViralResearchItem,
 ): string | undefined {
-  const haystack = normalizedResearchText(item.title);
+  const haystack = normalizedResearchText(
+    item.sourceType === "viral_sample"
+      ? `${item.title} ${item.snippet ?? ""} ${item.site ?? ""}`
+      : item.title,
+  );
   if (!haystack) return undefined;
   const matched = queryTerms(query).filter((term) => haystack.includes(term));
   if (matched.length) {
@@ -150,7 +180,7 @@ export function isResearchItemRelevant(
   query: ViralResearchQuery,
   item: ViralResearchItem,
 ): boolean {
-  if (item.sourceType === "owned_history" || item.sourceType === "viral_sample") {
+  if (item.sourceType === "owned_history") {
     return true;
   }
   return dictionaryRelevance(query, item) !== undefined;
@@ -162,7 +192,7 @@ export function filterResearchItemsByQuery(
   judgements: ReadonlyMap<string, ResearchRelevanceJudgement> = new Map(),
 ): ViralResearchItem[] {
   return candidates.flatMap((item) => {
-    if (item.sourceType === "owned_history" || item.sourceType === "viral_sample") {
+    if (item.sourceType === "owned_history") {
       return [item];
     }
     const judgement = judgements.get(item.id);

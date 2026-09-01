@@ -151,6 +151,7 @@ export async function researchHotspots(
     })),
     {
       trackIds: config.trackIds,
+      customKeywords: config.customKeywords,
       freshnessDays: config.freshnessDays,
       now,
       maxItems: HOTSPOT_MAX_ITEMS,
@@ -173,7 +174,7 @@ export async function researchHotspots(
   // 只留人话，按重要性取前两条；技术细节统一进 degradedReason。
   const limitations = [
     hasSkippedRsshubSources(resolvedSources)
-      ? "还没填 RSSHub 地址，微博、知乎、抖音热榜这次没有抓取。"
+      ? "还没填 RSSHub 地址，依赖 RSSHub 的来源这次没有抓取。"
       : "",
     failedCount > 0
       ? `有 ${failedCount} 个来源这次没抓到内容，其余来源正常。`

@@ -1,4 +1,5 @@
 import type {
+  ContentPlatform,
   ScriptDraftTopic,
   ViralResearchSnapshot,
 } from "@video-diagnosis/shared-types";
@@ -32,10 +33,29 @@ export function buildResearchQuery(input: {
   topicOther?: string | null;
   idea?: string;
   region?: string;
+  audience?: string;
+  contentGoal?: string;
+  targetPlatforms?: ContentPlatform[];
+  platformOther?: string;
 }): ViralResearchQuery {
   const topic = buildResearchQueryTopic(input);
   const region = input.region?.trim();
-  return region ? { topic, region } : { topic };
+  const audience = input.audience?.trim();
+  const contentGoal = input.contentGoal?.trim();
+  const targetPlatforms = input.targetPlatforms?.filter(
+    (platform, index, values) => values.indexOf(platform) === index,
+  );
+  const platformOther = input.platformOther?.trim();
+  return {
+    topic,
+    ...(region ? { region } : {}),
+    ...(audience ? { audience: audience.slice(0, 120) } : {}),
+    ...(contentGoal ? { contentGoal: contentGoal.slice(0, 120) } : {}),
+    ...(targetPlatforms?.length ? { targetPlatforms } : {}),
+    ...(targetPlatforms?.includes("other") && platformOther
+      ? { platformOther }
+      : {}),
+  };
 }
 
 export function snapshotHasWebSearch(

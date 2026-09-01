@@ -14,14 +14,11 @@ import {
   type HotspotRuntimeConfig,
   type HotspotRuntimeConfigOverride,
   type ResolvedHotspotSource,
+  normalizeHotspotKeywords,
 } from "@/lib/hotspots/types";
 import { allTrackIds } from "@/lib/tracks/dictionary";
 
-/**
- * 内置默认源清单。这些 URL 均未经在线验证，站点随时可能改版或下线；
- * 单源失效只会在 sourceReports 中记为 failed，不影响整体架构，
- * 用户可在设置页（后续任务）自行增删启停。
- */
+/** 内置默认源只保留实测可用项；站点改版后仍会由 sourceReports 单独报错。 */
 export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
   {
     id: "ithome",
@@ -32,9 +29,9 @@ export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
   },
   {
     id: "36kr",
-    name: "36氪",
-    url: "https://36kr.com/feed",
-    kind: "rss",
+    name: "36氪快讯（RSSHub）",
+    url: "/36kr/newsflashes",
+    kind: "rsshub",
     enabled: true,
   },
   {
@@ -52,16 +49,9 @@ export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
     enabled: true,
   },
   {
-    id: "smzdm",
-    name: "什么值得买",
-    url: "https://feed.smzdm.com/",
-    kind: "rss",
-    enabled: true,
-  },
-  {
     id: "rsshub-weibo-hot",
-    name: "微博热搜（RSSHub）",
-    url: "/weibo/search/hot",
+    name: "微博热搜（TopHub）",
+    url: "/tophub/WnBe01o371",
     kind: "rsshub",
     enabled: true,
   },
@@ -74,16 +64,9 @@ export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
   },
   {
     id: "rsshub-douyin-hot",
-    name: "抖音热搜（RSSHub）",
-    url: "/douyin/hot",
+    name: "抖音总榜（TopHub）",
+    url: "/tophub/Y2KeDGQdNP",
     kind: "rsshub",
-    enabled: true,
-  },
-  {
-    id: "dashscope-fallback",
-    name: "百炼联网兜底",
-    url: "search://recent-track-hotspots",
-    kind: "dashscope",
     enabled: true,
   },
 ] as const;
@@ -95,6 +78,8 @@ export function defaultHotspotRuntimeConfig(): HotspotRuntimeConfig {
     freshnessDays: HOTSPOT_DEFAULT_FRESHNESS_DAYS,
     maxItemsPerSource: HOTSPOT_DEFAULT_MAX_ITEMS_PER_SOURCE,
     trackIds: allTrackIds(),
+    customKeywords: [],
+    accountPositioning: "",
     sources: DEFAULT_HOTSPOT_SOURCES.map((source) => ({ ...source })),
     llm: { enabled: true, apiKey: "", apiBaseUrl: "", model: "" },
   };
@@ -105,7 +90,7 @@ function clampInteger(value: unknown, min: number, max: number, fallback: number
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function normalizeTrackIds(value: unknown): TrackId[] {
+function normalizeTrackIds(value: unknown, allowEmpty = false): TrackId[] {
   if (!Array.isArray(value)) return allTrackIds();
   const accepted: TrackId[] = [];
   for (const candidate of value) {
@@ -114,7 +99,7 @@ function normalizeTrackIds(value: unknown): TrackId[] {
       accepted.push(parsed.data);
     }
   }
-  return accepted.length ? accepted : allTrackIds();
+  return accepted.length ? accepted : allowEmpty ? [] : allTrackIds();
 }
 
 /** 用户配置为空则整体回落到内置清单；重复 id 只保留第一条。 */
@@ -142,6 +127,7 @@ export function resolveHotspotRuntimeConfig(
 ): HotspotRuntimeConfig {
   const base = defaultHotspotRuntimeConfig();
   if (!override) return base;
+  const customKeywords = normalizeHotspotKeywords(override.customKeywords);
   return {
     enabled: override.enabled ?? base.enabled,
     rsshubBaseUrl: override.rsshubBaseUrl?.trim() ?? base.rsshubBaseUrl,
@@ -157,7 +143,14 @@ export function resolveHotspotRuntimeConfig(
       HOTSPOT_MAX_ITEMS_PER_SOURCE,
       base.maxItemsPerSource,
     ),
-    trackIds: override.trackIds ? normalizeTrackIds(override.trackIds) : base.trackIds,
+    trackIds: override.trackIds
+      ? normalizeTrackIds(override.trackIds, customKeywords.length > 0)
+      : base.trackIds,
+    customKeywords,
+    accountPositioning:
+      typeof override.accountPositioning === "string"
+        ? override.accountPositioning.trim().slice(0, 300)
+        : base.accountPositioning,
     sources: override.sources ? mergeHotspotSources(override.sources) : base.sources,
     llm: { ...base.llm, ...override.llm },
   };

@@ -4,15 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import type { ViralSample, ViralSamplePlatform } from "@video-diagnosis/shared-types";
 import { Button, Card } from "@/components/ui";
-import { VIRAL_SAMPLE_PLATFORM_LABELS, parseOptionalMetric } from "@/lib/viral-research/samples";
+import {
+  VIRAL_SAMPLE_PLATFORM_LABELS,
+  parseOptionalMetric,
+} from "@/lib/viral-research/sample-fields";
 
-const PLATFORM_OPTIONS: ViralSamplePlatform[] = [
-  "weixin_channels",
-  "douyin",
-  "xiaohongshu",
-  "bilibili",
-  "other",
-];
+export const VIRAL_SAMPLE_PLATFORM_OPTIONS = Object.keys(
+  VIRAL_SAMPLE_PLATFORM_LABELS,
+) as ViralSamplePlatform[];
 
 export function ViralSampleForm() {
   const [items, setItems] = useState<ViralSample[]>([]);
@@ -164,8 +163,8 @@ export function ViralSampleForm() {
       <div>
         <h3 className="text-sm font-bold text-ink">爆款样本库</h3>
         <p className="mt-1 text-xs leading-5 text-[#78857e]">
-          手动录入带真实指标的参考样本；开始研究时会作为 verified_metric
-          来源并入结果，供你在面板中勾选参考。
+          可选录入你已人工核对的真实指标；有指标时标为人工核验指标，
+          没有指标时作为平台参考页面，均可在研究面板中勾选。
         </p>
       </div>
 
@@ -196,7 +195,7 @@ export function ViralSampleForm() {
               setPlatform(event.target.value as ViralSamplePlatform)
             }
           >
-            {PLATFORM_OPTIONS.map((option) => (
+            {VIRAL_SAMPLE_PLATFORM_OPTIONS.map((option) => (
               <option key={option} value={option}>
                 {VIRAL_SAMPLE_PLATFORM_LABELS[option]}
               </option>

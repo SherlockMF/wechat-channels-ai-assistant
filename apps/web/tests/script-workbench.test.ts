@@ -20,9 +20,15 @@ import {
 } from "@/lib/script-workbench/display";
 import { buildMockScriptOutput } from "@/lib/script-workbench/mock-generate";
 import {
+  editedSpokenBody,
   outputToPlainText,
   plainTextDivergesFromStructured,
 } from "@/lib/script-workbench/plain-text";
+import {
+  buildDeliveryGuidePromptContext,
+  ensureDeliveryGuide,
+  structuredSpokenBody,
+} from "@/lib/script-workbench/delivery-guide";
 import {
   finalizeScriptOutput,
   sanitizeScriptInput,
@@ -31,6 +37,7 @@ import {
 import {
   buildScriptGenerationPrompt,
   buildScriptQualityPrompt,
+  parseScriptDraftCandidate,
 } from "@/lib/script-workbench/dashscope-provider";
 import {
   ensureViralEnhancements,
@@ -131,6 +138,213 @@ describe("script workbench catalog and mock", () => {
     expect(out.productionGuide?.storyboard.length).toBeGreaterThan(0);
     expect(out.productionGuide?.materials).toEqual([]);
     expect(out.plainText).toContain("拍摄与剪辑指导");
+    expect(out.deliveryGuide?.blocks).toHaveLength(1);
+    expect(out.deliveryGuide?.blocks[0]?.sourceText).toBe(out.script);
+    expect(out.deliveryGuide?.blocks[0]?.sourceHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(out.plainText).not.toContain("排练攻略");
+    expect(out.plainText).not.toContain("实际念法");
+  });
+
+  it("默认模板使用自定义主题、账号画像与目标平台，不回落旧账号话术", () => {
+    const out = buildMockScriptOutput({
+      format: "koubo",
+      topic: "other",
+      subTopics: [],
+      processKinds: [],
+      input: {
+        idea: "教新手识别猫咪压力信号",
+        topicOther: "宠物行为",
+        audience: "新手养猫人",
+        targetPlatforms: ["tiktok"],
+      },
+      contentProfile: {
+        accountName: "猫语观察站",
+        brandName: "猫语实验室",
+        region: "东京",
+        positioning: "宠物行为科普",
+        audiences: ["新手养猫人"],
+        toneGuide: "温和可信",
+        ctaPolicy: "收藏后继续观察",
+        themeKeywords: ["猫咪行为"],
+        defaultPlatforms: ["tiktok"],
+        otherPlatformName: "",
+      },
+    });
+    expect(`${out.script}\n${out.tags.join(" ")}\n${out.gapsOrWarnings.join(" ")}`)
+      .toContain("宠物行为");
+    expect(out.gapsOrWarnings.join(" ")).toContain("TikTok");
+    expect(JSON.stringify(out)).not.toMatch(/企二代|全屋大拆|装修别找三家/u);
+  });
+
+  it("从可编辑制作包提取用户修改后的口播正文", () => {
+    const out = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: { idea: "净水体验" },
+    });
+    const edited = out.plainText.replace(out.script, "这是用户确认后的新口播。\n第二句也要保留。");
+    expect(editedSpokenBody(edited, out)).toBe(
+      "这是用户确认后的新口播。\n第二句也要保留。",
+    );
+  });
+
+  it("中性演讲攻略展开数字读法并绑定最终口播", () => {
+    const out = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: {
+        idea: "安全表达",
+        existingScript: "这个方案不能保证100%安全，预算约3000元。",
+        rewriteMode: "preserve",
+      },
+    });
+    const block = out.deliveryGuide?.blocks[0];
+    expect(block?.sourceText).toBe(out.script);
+    expect(block?.segments.map((item) => item.spokenAs).join(""))
+      .toContain("百分之一百");
+    expect(block?.segments.map((item) => item.spokenAs).join(""))
+      .toContain("三千元");
+    expect(block?.segments.every((item) => item.emotion && item.pace)).toBe(true);
+  });
+
+  it("年份按逐位念，英文缩写始终提示核对", () => {
+    const out = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: {
+        idea: "新品说明",
+        existingScript: "2026年AI净水方案升级。",
+        rewriteMode: "preserve",
+      },
+    });
+    const segments = out.deliveryGuide?.blocks[0]?.segments ?? [];
+    expect(segments.map((item) => item.spokenAs).join(""))
+      .toContain("二零二六年");
+    expect(
+      segments.flatMap((item) => item.pronunciation).find((item) => item.text === "AI")
+        ?.needsReview,
+    ).toBe(true);
+  });
+
+  it("跟拍攻略只绑定每个非空 timeline.say", () => {
+    const out = buildMockScriptOutput({
+      format: "service_process",
+      topic: "hydro",
+      subTopics: [],
+      processKinds: ["install_inspect"],
+      input: { idea: "验水电标准" },
+    });
+    const spokenSteps = out.timeline.filter((item) => item.say.trim());
+    expect(out.deliveryGuide?.blocks).toHaveLength(spokenSteps.length);
+    expect(out.deliveryGuide?.blocks.map((item) => item.order)).toEqual(
+      spokenSteps.map((item) => item.order),
+    );
+    expect(structuredSpokenBody(out)).toBe(
+      spokenSteps.map((item) => item.say.trim()).join("\n"),
+    );
+  });
+
+  it("缺失或错位攻略会按最终正文重建", () => {
+    const output = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: { idea: "软水体验" },
+    });
+    const rebuilt = ensureDeliveryGuide({
+      ...output,
+      script: "这是最终确认的口播。",
+      deliveryGuide: output.deliveryGuide,
+    });
+    expect(rebuilt.deliveryGuide?.blocks[0]?.sourceText).toBe("这是最终确认的口播。");
+    expect(buildDeliveryGuidePromptContext(rebuilt)).toContain("这是最终确认的口播。");
+  });
+
+  it("只覆盖正文一小段的模型攻略会被拒绝并完整重建", () => {
+    const output = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: { idea: "完整覆盖测试" },
+    });
+    const block = output.deliveryGuide?.blocks[0];
+    const segment = block?.segments[0];
+    expect(block).toBeDefined();
+    expect(segment).toBeDefined();
+    const partial = block!.sourceText.slice(0, 2);
+    const rebuilt = ensureDeliveryGuide({
+      ...output,
+      deliveryGuide: {
+        ...output.deliveryGuide!,
+        blocks: [
+          {
+            ...block!,
+            segments: [{ ...segment!, text: partial, spokenAs: partial }],
+          },
+        ],
+      },
+    });
+    expect(
+      rebuilt.deliveryGuide?.blocks[0]?.segments.map((item) => item.text).join(""),
+    ).toBe(block!.sourceText);
+    expect(rebuilt.deliveryGuide?.warnings.join("；")).toContain("中性攻略");
+  });
+
+  it("模型攻略格式损坏时保留正文并交给中性 fallback", () => {
+    const output = buildMockScriptOutput({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: { idea: "软水体验" },
+    });
+    const parsed = parseScriptDraftCandidate({
+      ...output,
+      deliveryGuide: {
+        ...output.deliveryGuide,
+        blocks: [{ sourceHash: "bad-hash" }],
+      },
+    });
+    expect(parsed.script).toBe(output.script);
+    expect(parsed.deliveryGuide).toBeUndefined();
+  });
+
+  it("生成提示使用账号画像和目标平台而不是固定品牌地域", () => {
+    const prompt = buildScriptGenerationPrompt({
+      format: "koubo",
+      topic: "water",
+      subTopics: [],
+      processKinds: [],
+      input: {
+        idea: "租房净水避坑",
+        targetPlatforms: ["douyin"],
+      },
+      contentProfile: {
+        accountName: "杭州租房研究所",
+        brandName: "住得好",
+        region: "杭州",
+        positioning: "租房居住体验测评",
+        audiences: ["杭州租房人群"],
+        toneGuide: "真诚、清楚",
+        ctaPolicy: "不强推私信",
+        themeKeywords: ["租房", "净水"],
+        defaultPlatforms: ["xiaohongshu"],
+        otherPlatformName: "",
+      },
+    });
+    expect(prompt).toContain("杭州租房研究所");
+    expect(prompt).toContain("住得好");
+    expect(prompt).toContain("抖音");
+    expect(prompt).not.toContain("服务开远本地");
+    expect(prompt).not.toContain("公司「恒远」");
   });
 
   it("mock shot status returns materials and uses materialNotes", () => {
@@ -451,6 +665,13 @@ describe("script workbench catalog and mock", () => {
             latestAt: new Date().toISOString(),
             heat: 8,
             trackIds: ["smart_home"],
+            confidence: "medium",
+            scoreBreakdown: {
+              sourceDiversity: 3,
+              itemVolume: 1,
+              recency: 3,
+              dateConfidence: 1,
+            },
           },
         ],
         topicCards: [

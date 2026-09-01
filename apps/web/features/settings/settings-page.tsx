@@ -17,13 +17,15 @@ import { HotspotSection } from "@/features/settings/hotspot-section";
 import type { HealthCheck } from "@/lib/settings/types";
 import { defaultUserSettings } from "@/lib/settings/schema";
 import type { UserSettings } from "@/lib/settings/schema";
+import { normalizeContentProfile } from "@/lib/settings/content-profile";
+import { PLATFORM_CATALOG } from "@/lib/platforms/catalog";
 import {
   NATIVE_DASHSCOPE_RESEARCH_BASE_URL,
   describeWebResearchConfig,
   normalizeWebResearchBlock,
 } from "@/lib/settings/web-research-config";
 
-type TabId = "health" | "api" | "guide";
+type TabId = "health" | "profile" | "api" | "guide";
 
 type HealthResponse = {
   ok: boolean;
@@ -33,6 +35,7 @@ type HealthResponse = {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "health", label: "环境检测" },
+  { id: "profile", label: "账号画像" },
   { id: "api", label: "API 配置" },
   { id: "guide", label: "首次指引" },
 ];
@@ -323,6 +326,27 @@ export function SettingsPage() {
       <Card className="p-6">
         {tab === "health" && <HealthList checks={health?.checks ?? []} />}
 
+        {tab === "profile" && (
+          <div className="space-y-4">
+            <ContentProfileForm settings={settings} onChange={setSettings} />
+            <Button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                const next = {
+                  ...settings,
+                  contentProfile: normalizeContentProfile(settings.contentProfile),
+                };
+                setSettings(next);
+                void saveSettings(next);
+              }}
+            >
+              <Save size={14} />
+              保存账号画像
+            </Button>
+          </div>
+        )}
+
         {tab === "api" && (
           <div className="space-y-4">
             <ApiForm
@@ -409,6 +433,137 @@ export function SettingsPage() {
           <p className="mt-4 text-sm font-semibold text-pine">{message}</p>
         )}
       </Card>
+    </div>
+  );
+}
+
+function ContentProfileForm({
+  settings,
+  onChange,
+}: {
+  settings: UserSettings;
+  onChange: (next: UserSettings) => void;
+}) {
+  const profile = settings.contentProfile;
+  const update = (patch: Partial<UserSettings["contentProfile"]>) =>
+    onChange({
+      ...settings,
+      contentProfile: { ...profile, ...patch },
+    });
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="font-semibold text-ink">当前工作区账号画像</h3>
+        <p className="mt-1 text-sm leading-6 text-[#66736c]">
+          研究、选题和脚本会使用这份画像。当前是单工作区单画像；切换画像不会隔离旧稿和历史数据。
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {([
+          ["accountName", "账号名称", "例如：杭州租房研究所"],
+          ["brandName", "品牌名称", "例如：住得好"],
+          ["region", "主要地域", "例如：杭州及周边"],
+        ] as const).map(([key, label, placeholder]) => (
+          <label key={key} className="block space-y-1.5">
+            <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+              {label}
+            </span>
+            <input
+              className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+              value={profile[key]}
+              maxLength={80}
+              placeholder={placeholder}
+              onChange={(event) => update({ [key]: event.target.value })}
+            />
+          </label>
+        ))}
+      </div>
+      {([
+        ["positioning", "账号定位", "讲清做什么、为什么值得关注"],
+        ["toneGuide", "表达语气", "例如：真实、专业、口语自然，不夸大"],
+        ["ctaPolicy", "CTA 边界", "例如：自然承接内容价值，不强行索取私信"],
+      ] as const).map(([key, label, placeholder]) => (
+        <label key={key} className="block space-y-1.5">
+          <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+            {label}
+          </span>
+          <textarea
+            className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine"
+            value={profile[key]}
+            maxLength={300}
+            placeholder={placeholder}
+            onChange={(event) => update({ [key]: event.target.value })}
+          />
+        </label>
+      ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+            目标受众（每行一个）
+          </span>
+          <textarea
+            className="min-h-28 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine"
+            value={profile.audiences.join("\n")}
+            onChange={(event) => update({ audiences: event.target.value.split("\n") })}
+          />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
+            自定义主题词（逗号或换行分隔）
+          </span>
+          <textarea
+            className="min-h-28 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine"
+            value={profile.themeKeywords.join("、")}
+            onChange={(event) =>
+              update({ themeKeywords: event.target.value.split(/[、,，\n]/u) })
+            }
+          />
+        </label>
+      </div>
+      <fieldset className="space-y-3 rounded-xl border border-line bg-fog/30 p-4">
+        <legend className="px-1 text-sm font-bold text-ink">默认目标平台（最多 4 个）</legend>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {PLATFORM_CATALOG.map((platform) => {
+            const selected = profile.defaultPlatforms.includes(platform.id);
+            const limitReached = profile.defaultPlatforms.length >= 4;
+            return (
+              <label key={platform.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={
+                    (!selected && limitReached) ||
+                    (selected && profile.defaultPlatforms.length === 1)
+                  }
+                  onChange={(event) =>
+                    update({
+                      defaultPlatforms: event.target.checked
+                        ? [...profile.defaultPlatforms, platform.id]
+                        : profile.defaultPlatforms.filter((item) => item !== platform.id),
+                    })
+                  }
+                />
+                {platform.label}
+              </label>
+            );
+          })}
+        </div>
+        {profile.defaultPlatforms.includes("other") ? (
+          <label className="block space-y-1.5">
+            <span className="text-xs font-bold text-[#78857e]">其他平台名称</span>
+            <input
+              className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+              value={profile.otherPlatformName}
+              maxLength={60}
+              onChange={(event) => update({ otherPlatformName: event.target.value })}
+            />
+          </label>
+        ) : null}
+        <p className="text-xs leading-5 text-[#78857e]">
+          当前平台能力仅用于内容策略与手工输入，不包含 OAuth、自动发布或指标同步。
+        </p>
+      </fieldset>
     </div>
   );
 }

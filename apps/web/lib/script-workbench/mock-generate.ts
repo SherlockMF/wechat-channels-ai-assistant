@@ -11,12 +11,15 @@ import {
   type ScriptGenerateRequest,
 } from "@/lib/script-workbench/production-guide";
 import { outputToPlainText } from "@/lib/script-workbench/plain-text";
+import { ensureDeliveryGuide } from "@/lib/script-workbench/delivery-guide";
 import { ensureViralEnhancements } from "@/lib/script-workbench/viral-plan";
+import { normalizeContentProfile } from "@/lib/settings/content-profile";
+import { platformPromptGuidance } from "@/lib/platforms/catalog";
 
 export type { ScriptGenerateRequest } from "@/lib/script-workbench/production-guide";
 
-function topicPhrase(topic: ScriptDraftTopic | null): string {
-  return topicLabel(topic);
+function topicPhrase(topic: ScriptDraftTopic | null, topicOther?: string): string {
+  return topicLabel(topic, topicOther);
 }
 
 function withProductionGuide(
@@ -32,6 +35,7 @@ function withProductionGuide(
     plainText: "",
   };
   next = ensureViralEnhancements(request, next);
+  next = ensureDeliveryGuide(next);
   next.plainText = outputToPlainText(next);
   return next;
 }
@@ -41,7 +45,7 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
   const idea = input.idea.trim();
   const existing = input.existingScript?.trim();
   const points = input.sellingPoints?.trim();
-  const topicText = topicPhrase(topic);
+  const topicText = topicPhrase(topic, input.topicOther);
   const subLabels = smartSubTopicLabels(subTopics);
   const subText =
     subLabels.length > 0
@@ -52,26 +56,29 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
   const seconds = input.targetSeconds ?? (format === "showroom_koubo" ? 60 : 30);
   const titleSeed = shortHook(idea, 20);
   const rewriteMode = input.rewriteMode ?? "polish";
+  const profile = normalizeContentProfile(request.contentProfile);
+  const cta = input.ctaGoal?.trim() || profile.ctaPolicy;
+  const audience = input.audience?.trim() || profile.audiences[0] || "目标受众";
 
   const generatedScript = format === "service_intro"
       ? [
-          `很多人装修要找好几家，智能、净水、水电分开对接，又累又容易对不上。`,
-          `我们做的是${topicText}相关的一站式服务：方案、施工、交付一条线跟到底。`,
+          `很多人选择${topicText}相关服务时，信息不少，但需求、方案和交付常常对不上。`,
+          `${profile.brandName}围绕${topicText}提供从需求梳理到交付复盘的一站式服务。`,
           points
             ? `这次重点说：${points}。`
-            : `省事、省钱、还省心，不用你来回对接三拨人。`,
-          `想了解自己家适不适合，私信我发户型/需求，我帮你看看。`,
+            : `把范围、成本和验收方式提前说清，减少来回沟通。`,
+          cta,
         ].join("")
       : [
-          `${idea}——这种日常糟心，其实挺多人懂。`,
-          `不用全屋大拆，用${subText}就能先把体验拉起来。`,
+          `${idea}——这是${audience}经常遇到的具体问题。`,
+          `先把${topicText}的真实场景和结果讲清，不堆概念。`,
           points
             ? `关键就这几点：${points}。`
-            : `比如场景模式、自动感应、少动手，住着会轻松很多。`,
+            : `用一个具体问题、一段过程演示和一个可复核结论，把价值讲明白。`,
           format === "showroom_koubo"
             ? `你就站在场景里演示一遍：进门、开关、模式切换，让人一眼看懂。`
-            : `拍的时候口播短一点，中间插产品特写和效果对比就够。`,
-          `需要方案或报价，私信我，按你家情况给建议。`,
+            : `拍的时候口播短一点，中间插过程、细节和结果画面。`,
+          cta,
         ].join("");
   const script = existing
     ? rewriteMode === "preserve"
@@ -92,27 +99,27 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
       ? [
           titleSeed || `${subText}小改造`,
           `${topicText}｜${subText}`,
-          `做饭时谁懂｜${subText || "智能小改造"}`,
+          `${audience}最关心什么｜${subText}`,
         ]
       : [
           titleSeed,
           `${topicText}｜${shortHook(idea, 14) || "实用分享"}`,
           format === "service_intro"
-            ? `装修别找三家｜${topicText}一站式`
-            : `谁懂这种痛｜${subText}`,
+            ? `${topicText}怎么选｜一站式服务`
+            : `这个问题怎么解决｜${subText}`,
         ],
     tags: [
       topicText,
       ...subLabels,
-      "开远",
-      format === "service_intro" ? "一站式服务" : "装修",
+      profile.region,
+      format === "service_intro" ? "一站式服务" : "实用分享",
     ].filter(Boolean),
     script,
     brollCues: existing
       ? [
           { section: "开头痛点", cue: "按你稿里的画面思路拍痛点特写" },
-          { section: "产品展示", cue: "按稿中产品/电机运行画面穿插" },
-          { section: "收束种草", cue: "效果演示 + 一句 CTA" },
+          { section: "过程展示", cue: "按稿中步骤、对象或关键动作穿插" },
+          { section: "收束转化", cue: "结果画面 + 一句 CTA" },
         ]
       : [
           { section: "开头痛点", cue: "生活痛点画面或手部操作特写" },
@@ -121,7 +128,7 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
             cue:
               format === "showroom_koubo"
                 ? "展厅场景中人站在智能场景里操作"
-                : "产品特写、效果对比或示意图",
+                : "过程特写、结果对比或必要示意图",
           },
           { section: "收束CTA", cue: "品牌/服务露出或联系方式画面" },
         ],
@@ -130,11 +137,11 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
       : [
           shortHook(idea, 18) || "先说痛点",
           points?.slice(0, 18) || "关键卖点一句",
-          "私信了解方案",
+          cta.slice(0, 18),
         ],
     altHooks: [
-      `谁懂这种麻烦：${titleSeed || subText}`,
-      `花小钱先解决：${subText}`,
+      `先看这个问题：${titleSeed || subText}`,
+      `一个具体办法：${subText}`,
     ],
     positioning: null,
     timeline: [],
@@ -157,6 +164,13 @@ function buildKoubo(request: ScriptGenerateRequest): ScriptDraftOutput {
       `可参考历史片：${request.referenceHints.slice(0, 2).join("；")}`,
     );
   }
+  const platformGuidance = platformPromptGuidance(
+    input.targetPlatforms ?? profile.defaultPlatforms,
+    input.platformOther || profile.otherPlatformName,
+  );
+  if (platformGuidance) {
+    output.gapsOrWarnings.push(`平台适配：${platformGuidance.replace(/\n/gu, "；")}`);
+  }
   return withProductionGuide(request, output);
 }
 
@@ -174,14 +188,15 @@ function processLabels(kinds: ScriptDraftProcessKind[]): string {
 function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
   const { format, topic, input, processKinds } = request;
   const idea = input.idea.trim();
-  const topicText = topicPhrase(topic);
+  const topicText = topicPhrase(topic, input.topicOther);
+  const profile = normalizeContentProfile(request.contentProfile);
 
   if (format === "vlog") {
     const day = input.dayPlan?.trim() || idea;
     const output: ScriptDraftOutput = {
       pipeline: "follow",
-      titles: [day.slice(0, 28) || "今日日常", `企二代日常｜${day.slice(0, 12)}`],
-      tags: topic ? [topicText, "vlog", "日常"] : ["vlog", "日常", "企二代"],
+      titles: [day.slice(0, 28) || "今日日常", `${profile.accountName}日常｜${day.slice(0, 12)}`],
+      tags: topic ? [topicText, "vlog", "日常"] : ["vlog", "日常", profile.accountName],
       script: "",
       brollCues: [],
       subtitleBeats: [],
@@ -236,7 +251,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
         shoot: kinds.includes("plan_meeting")
           ? "方案沟通：图纸/平板/手势讲解（避免合同细节入镜）"
           : kinds.includes("install_inspect")
-            ? "逐项验标准：线管、固定、间距、观感"
+            ? "逐项验标准：关键步骤、验收点与最终观感"
             : "进度对照：已完成 vs 待完成区域",
         say: `围绕「${must}」讲清楚为什么重要`,
         subtitle: must.slice(0, 18),
@@ -331,7 +346,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
       `新项目落地｜${highlight.slice(0, 14)}`,
       `${projectType}｜${highlight.slice(0, 12)}`,
     ],
-    tags: [topicText, "项目完工", "全屋智能", "开远"],
+    tags: [topicText, "项目完工", projectType, profile.region],
     script: "",
     brollCues: [],
     subtitleBeats: [],
@@ -347,7 +362,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
       {
         order: 2,
         shoot: `功能演示（${shots}）`,
-        say: "手机/面板控制，让人看懂好用",
+        say: "演示核心功能或成果，让人一眼看懂价值",
         subtitle: "随心控制",
       },
       {
@@ -360,7 +375,7 @@ function buildFollow(request: ScriptGenerateRequest): ScriptDraftOutput {
         order: 4,
         shoot: "品牌角标收尾",
         say: "欢迎咨询同款方案",
-        subtitle: "恒远智能",
+        subtitle: profile.brandName,
       },
     ],
     // internalNote 仅存于 input，不进入可复制 gaps/plainText

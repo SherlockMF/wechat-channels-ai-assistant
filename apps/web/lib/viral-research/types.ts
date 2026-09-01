@@ -1,10 +1,12 @@
 import { z } from "zod";
 import type {
+  ContentPlatform,
   ImportedVideoRecord,
   ViralResearchItem,
   ViralResearchSnapshot,
   ViralResearchTopicCard,
 } from "@video-diagnosis/shared-types";
+import { contentPlatformSchema } from "@video-diagnosis/shared-types";
 
 export const VIRAL_RESEARCH_CACHE_TTL_MS = 72 * 60 * 60 * 1000;
 
@@ -13,13 +15,25 @@ export const VIRAL_RESEARCH_SNAPSHOT_RETENTION = 30;
 
 const optionalQueryField = z.string().trim().min(1).max(120).optional();
 
-export const viralResearchQuerySchema = z.object({
-  topic: z.string().trim().min(2).max(200),
-  format: optionalQueryField,
-  audience: optionalQueryField,
-  contentGoal: optionalQueryField,
-  region: optionalQueryField,
-});
+export const viralResearchQuerySchema = z
+  .object({
+    topic: z.string().trim().min(2).max(200),
+    format: optionalQueryField,
+    audience: optionalQueryField,
+    contentGoal: optionalQueryField,
+    region: optionalQueryField,
+    targetPlatforms: z.array(contentPlatformSchema).max(4).optional(),
+    platformOther: z.string().trim().min(1).max(60).optional(),
+  })
+  .superRefine((query, ctx) => {
+    if (query.targetPlatforms?.includes("other") && !query.platformOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["platformOther"],
+        message: "选择其他平台时必须填写平台名称",
+      });
+    }
+  });
 
 export const viralResearchRequestSchema = z.object({
   query: viralResearchQuerySchema,
@@ -27,6 +41,7 @@ export const viralResearchRequestSchema = z.object({
 });
 
 export type ViralResearchQuery = z.infer<typeof viralResearchQuerySchema>;
+export type ViralResearchTargetPlatform = ContentPlatform;
 export type ViralResearchRequest = z.input<typeof viralResearchRequestSchema>;
 
 export type ResearchAdapterStatus =

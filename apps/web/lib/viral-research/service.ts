@@ -16,6 +16,7 @@ import {
   createViralResearchSnapshotId,
   isViralResearchSnapshotExpired,
   readCachedViralResearchSnapshot,
+  viralResearchContextFingerprint,
   writeViralResearchSnapshot,
 } from "@/lib/viral-research/cache";
 import { resolveViralResearchConfig } from "@/lib/viral-research/config";
@@ -149,7 +150,12 @@ function cardEvidenceStrength(
   levelById: ReadonlyMap<string, ViralResearchItem["evidenceLevel"]>,
 ): ViralResearchTopicCard["evidenceStrength"] {
   const levels = sourceIds.map((id) => levelById.get(id));
-  if (levels.includes("platform_page")) return "platform_sourced";
+  if (
+    levels.includes("platform_page") ||
+    levels.includes("verified_metric")
+  ) {
+    return "platform_sourced";
+  }
   if (levels.includes("media_article")) return "media_sourced";
   return "weak";
 }
@@ -217,7 +223,7 @@ function uniqueReasons(...reasons: Array<string | undefined>): string[] {
   return [...new Set(reasons.filter((reason): reason is string => Boolean(reason)))];
 }
 
-/** 联网结果拿不到互动指标，只能按证据等级排序；同级保持原始顺序。 */
+/** 联网结果拿不到互动指标，按证据、新鲜度和账号适配共同排序。 */
 const EXTERNAL_EVIDENCE_RANK: Record<string, number> = {
   verified_metric: 4,
   platform_page: 3,
@@ -226,7 +232,63 @@ const EXTERNAL_EVIDENCE_RANK: Record<string, number> = {
 };
 
 function externalEvidenceScore(item: ViralResearchItem): number {
-  return EXTERNAL_EVIDENCE_RANK[item.evidenceLevel] ?? 0;
+  return (EXTERNAL_EVIDENCE_RANK[item.evidenceLevel] ?? 0) * 100;
+}
+
+const FUTURE_DATE_TOLERANCE_MS = 5 * 60 * 1000;
+
+function parsedPublishedAt(item: ViralResearchItem): number | undefined {
+  if (!item.publishedAt) return undefined;
+  const parsed = Date.parse(item.publishedAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function sourceIsInsideFreshnessWindow(
+  item: ViralResearchItem,
+  now: Date,
+  freshnessDays: number,
+): boolean {
+  const publishedAt = parsedPublishedAt(item);
+  if (publishedAt === undefined) return true;
+  const nowMs = now.getTime();
+  if (publishedAt > nowMs + FUTURE_DATE_TOLERANCE_MS) return false;
+  return publishedAt >= nowMs - freshnessDays * 24 * 60 * 60 * 1000;
+}
+
+function externalFreshnessScore(
+  item: ViralResearchItem,
+  now: Date,
+  freshnessDays: number,
+): number {
+  const publishedAt = parsedPublishedAt(item);
+  if (publishedAt === undefined) return 5;
+  const ageDays = Math.max(0, now.getTime() - publishedAt) / (24 * 60 * 60 * 1000);
+  return Math.max(10, 30 * (1 - ageDays / Math.max(1, freshnessDays)));
+}
+
+function accountFitScore(item: ViralResearchItem): number {
+  switch (item.accountFit?.level) {
+    case "high":
+      return 20;
+    case "medium":
+      return 10;
+    case "unknown":
+      return 5;
+    default:
+      return 0;
+  }
+}
+
+function externalResearchScore(
+  item: ViralResearchItem,
+  now: Date,
+  freshnessDays: number,
+): number {
+  return (
+    externalEvidenceScore(item) +
+    externalFreshnessScore(item, now, freshnessDays) +
+    accountFitScore(item)
+  );
 }
 
 function relevanceJudgementsById(
@@ -261,9 +323,20 @@ export async function researchViralVideos(
   const config = options.config ?? (await resolveViralResearchConfig());
   const now = options.now?.() ?? new Date();
   const model = config.dashscope.model;
+  // 个性化上下文必须先于缓存读取，避免新增样本或账号数据后继续命中旧快照。
+  const [history, samples] = await Promise.all([
+    ownerHistory(options),
+    manualSamples(options),
+  ]);
+  const contextFingerprint = viralResearchContextFingerprint(
+    history.records,
+    samples,
+  );
   const cached = await readCachedViralResearchSnapshot(owner, input.query, {
     storageRoot: options.storageRoot,
     model,
+    freshnessDays: config.dashscope.freshnessDays,
+    contextFingerprint,
   });
   if (
     cached &&
@@ -274,11 +347,11 @@ export async function researchViralVideos(
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const [dashscope, history, samples] = await Promise.all([
-    searchDashScope(config.dashscope, input.query, fetchImpl),
-    ownerHistory(options),
-    manualSamples(options),
-  ]);
+  const dashscope = await searchDashScope(
+    config.dashscope,
+    input.query,
+    fetchImpl,
+  );
 
   const safeExternalItems = enforceResearchItemPolicy(dashscope.items, 100);
   const relevantExternalItems = filterResearchItemsByQuery(
@@ -286,12 +359,31 @@ export async function researchViralVideos(
     safeExternalItems,
     relevanceJudgementsById(dashscope),
   );
+  const accountAdjusted = applyOwnerAccountFit(
+    relevantExternalItems.filter((item) =>
+      sourceIsInsideFreshnessWindow(
+        item,
+        now,
+        config.dashscope.freshnessDays,
+      ),
+    ),
+    history.records,
+  );
   const externalItems = enforceResearchItemPolicy(
-    relevantExternalItems
+    accountAdjusted
       .map((item, position) => ({ item, position }))
       .sort(
         (left, right) =>
-          externalEvidenceScore(right.item) - externalEvidenceScore(left.item) ||
+          externalResearchScore(
+            right.item,
+            now,
+            config.dashscope.freshnessDays,
+          ) -
+            externalResearchScore(
+              left.item,
+              now,
+              config.dashscope.freshnessDays,
+            ) ||
           left.position - right.position,
       )
       .map(({ item }) => item),
@@ -319,14 +411,17 @@ export async function researchViralVideos(
     };
   }
 
-  const accountAdjusted = applyOwnerAccountFit(externalItems, history.records);
+  const relevantSampleItems = filterResearchItemsByQuery(
+    input.query,
+    viralSamplesToResearchItems(samples, input.query),
+  );
   const sampleItems = enforceResearchItemPolicy(
-    viralSamplesToResearchItems(samples),
+    relevantSampleItems,
     5,
   );
   const historyItems = selectOwnedHistoryItems(input.query, history.records, 2);
   const items = enforceResearchItemPolicy(
-    [...sampleItems, ...accountAdjusted, ...historyItems],
+    [...sampleItems, ...externalItems, ...historyItems],
     10,
   );
   const fetchedAt = now.toISOString();
@@ -335,6 +430,9 @@ export async function researchViralVideos(
     items
       .filter((item) => item.sourceType === "dashscope")
       .map((item) => item.id),
+  );
+  const finalExternalItems = items.filter(
+    (item) => item.sourceType === "dashscope",
   );
   const canSummarizeCommonalities = allowedDashIds.size >= 1;
   const commonPatterns = canSummarizeCommonalities
@@ -348,7 +446,11 @@ export async function researchViralVideos(
     input.query,
     dashscope,
     allowedDashIds,
-    externalItems,
+    finalExternalItems,
+  );
+  const finalItemIds = new Set(items.map((item) => item.id));
+  const closedTopicCards = topicCards.filter((card) =>
+    card.sourceIds.every((sourceId) => finalItemIds.has(sourceId)),
   );
 
   // 只保留两条人话；技术性原因统一放进 degradedReason。
@@ -362,7 +464,7 @@ export async function researchViralVideos(
   }
   if (externalItems.length === 0 && sampleItems.length === 0) {
     limitations.push("这次没检索到可用的公开来源，可以换个关键词再试一次。");
-  } else if (externalItems.length > 0 && topicCards.length === 0) {
+  } else if (externalItems.length > 0 && closedTopicCards.length === 0) {
     limitations.push("这次没整理出选题角度，下方来源仍可直接点开参考。");
   } else if (history.records.length < 3 && externalItems.length > 0) {
     limitations.push(
@@ -390,7 +492,7 @@ export async function researchViralVideos(
     fetchedAt,
     expiresAt: new Date(now.getTime() + VIRAL_RESEARCH_CACHE_TTL_MS).toISOString(),
     items,
-    topicCards,
+    topicCards: closedTopicCards,
     commonPatterns,
     limitations: [...new Set(limitations)].slice(0, 2),
     degradedReason: degradedReasons.length
@@ -403,6 +505,12 @@ export async function researchViralVideos(
       storageRoot: options.storageRoot,
       ...(externalItems.length > 0
         ? { cacheQuery: input.query, cacheModel: model }
+        : {}),
+      ...(externalItems.length > 0
+        ? {
+            cacheFreshnessDays: config.dashscope.freshnessDays,
+            cacheContextFingerprint: contextFingerprint,
+          }
         : {}),
     });
     return { snapshot, cacheHit: false, expired: false };

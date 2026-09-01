@@ -1,16 +1,12 @@
 import { createHash } from "node:crypto";
 import type { ViralResearchItem, ViralSample } from "@video-diagnosis/shared-types";
+import type { ViralResearchQuery } from "@/lib/viral-research/types";
+import {
+  VIRAL_SAMPLE_PLATFORM_LABELS,
+  parseOptionalMetric,
+} from "@/lib/viral-research/sample-fields";
 
-export const VIRAL_SAMPLE_PLATFORM_LABELS: Record<
-  ViralSample["platform"],
-  string
-> = {
-  weixin_channels: "视频号",
-  douyin: "抖音",
-  xiaohongshu: "小红书",
-  bilibili: "B站",
-  other: "其他平台",
-};
+export { VIRAL_SAMPLE_PLATFORM_LABELS, parseOptionalMetric };
 
 export function viralSamplePlatformLabel(sample: ViralSample): string {
   if (sample.platform === "other" && sample.platformOther?.trim()) {
@@ -31,7 +27,13 @@ export function viralSampleToResearchItem(sample: ViralSample): ViralResearchIte
     url: sample.url,
     site: viralSamplePlatformLabel(sample),
     snippet: [sample.notes, sample.structureNotes].filter(Boolean).join("\n") || undefined,
-    evidenceLevel: "verified_metric",
+    evidenceLevel:
+      sample.visibleMetrics &&
+      Object.values(sample.visibleMetrics).some(
+        (value) => typeof value === "number" && Number.isFinite(value),
+      )
+        ? "verified_metric"
+        : "platform_page",
     visibleMetrics: sample.visibleMetrics,
     relevanceReasons: reasons,
   };
@@ -39,8 +41,25 @@ export function viralSampleToResearchItem(sample: ViralSample): ViralResearchIte
 
 export function viralSamplesToResearchItems(
   samples: readonly ViralSample[],
+  query?: ViralResearchQuery,
 ): ViralResearchItem[] {
-  return samples.map(viralSampleToResearchItem);
+  const platforms = query?.targetPlatforms?.length
+    ? new Set(query.targetPlatforms)
+    : undefined;
+  const expectedOther = query?.platformOther
+    ?.normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase();
+  return samples
+    .filter((sample) => {
+      if (platforms && !platforms.has(sample.platform)) return false;
+      if (sample.platform !== "other" || !expectedOther) return true;
+      return (
+        sample.platformOther?.normalize("NFKC").trim().toLocaleLowerCase() ===
+        expectedOther
+      );
+    })
+    .map(viralSampleToResearchItem);
 }
 
 function isViralSampleBackendUnsupported(error: unknown): boolean {
@@ -68,12 +87,4 @@ export async function loadViralSamplesForResearch(
     if (isViralSampleBackendUnsupported(error)) return [];
     throw error;
   }
-}
-
-export function parseOptionalMetric(value: string): number | undefined {
-  const raw = value.trim();
-  if (!raw) return undefined;
-  if (!/^\d+$/u.test(raw)) return undefined;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }

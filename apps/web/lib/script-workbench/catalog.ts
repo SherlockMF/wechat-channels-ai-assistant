@@ -113,13 +113,13 @@ export function smartSubTopicLabels(
 export function topicKeywords(topic: ScriptDraftTopic | null): string[] {
   switch (topic) {
     case "water":
-      return ["净水", "软水", "净水器", "水健康", "萨奇", "水倍康"];
+      return ["净水", "软水", "净水器", "水健康"];
     case "hydro":
       return ["水电", "施工", "隐蔽工程", "线管"];
     case "service":
-      return ["一站式", "服务", "恒远", "找恒远"];
+      return ["一站式", "服务", "方案", "交付"];
     case "smart_home":
-      return ["全屋智能", "智能家居", "灯光", "窗帘", "安防", "门锁", "易来"];
+      return ["全屋智能", "智能家居", "灯光", "窗帘", "安防", "门锁"];
     default:
       return [];
   }

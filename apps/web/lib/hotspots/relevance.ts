@@ -3,7 +3,12 @@ import type {
   HotspotSourceConfig,
   TrackId,
 } from "@video-diagnosis/shared-types";
-import { HOTSPOT_MAX_ITEMS, type HotspotFeedEntry } from "@/lib/hotspots/types";
+import {
+  HOTSPOT_FUTURE_TOLERANCE_MS,
+  HOTSPOT_MAX_ITEMS,
+  normalizeHotspotKeywords,
+  type HotspotFeedEntry,
+} from "@/lib/hotspots/types";
 import { canonicalHotspotUrl, hotspotItemId } from "@/lib/hotspots/url-policy";
 import { matchTracks, normalizeTrackText } from "@/lib/tracks/dictionary";
 
@@ -20,9 +25,23 @@ export interface HotspotRelevanceResult {
 
 export interface HotspotRelevanceOptions {
   trackIds: readonly TrackId[];
+  customKeywords?: readonly string[];
   freshnessDays: number;
   now: Date;
   maxItems?: number;
+}
+
+function matchCustomKeywords(text: string, value: unknown): string[] {
+  const keywords = normalizeHotspotKeywords(value);
+  const normalizedText = normalizeTrackText(text);
+  const symbolText = text.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, "");
+  return keywords.filter((keyword) => {
+    const normalizedKeyword = normalizeTrackText(keyword);
+    if (normalizedKeyword) return normalizedText.includes(normalizedKeyword);
+    return symbolText.includes(
+      keyword.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, ""),
+    );
+  });
 }
 
 interface Bucket {
@@ -46,16 +65,19 @@ export function selectRelevantHotspotItems(
       // 解析层已归一过，这里再归一一次保证任何调用方进来的地址都能跨源对齐。
       const canonicalUrl = canonicalHotspotUrl(entry.url);
       if (!canonicalUrl) continue;
-      const matched = matchTracks(
-        `${entry.title} ${entry.summary ?? ""}`,
-        options.trackIds,
+      const searchableText = `${entry.title} ${entry.summary ?? ""}`;
+      const matched = matchTracks(searchableText, options.trackIds);
+      const customTerms = matchCustomKeywords(
+        searchableText,
+        options.customKeywords ?? [],
       );
-      if (matched.trackIds.length === 0) continue;
+      if (matched.trackIds.length === 0 && customTerms.length === 0) continue;
 
       const parsed = entry.publishedAt ? Date.parse(entry.publishedAt) : Number.NaN;
       const hasDate = Number.isFinite(parsed);
-      // 没有发布时间的源（不少热榜如此）按抓取时刻视为新鲜。
       if (hasDate && parsed < floor) continue;
+      if (hasDate && parsed > nowMs + HOTSPOT_FUTURE_TOLERANCE_MS) continue;
+      // 无发布时间条目仍参与排序；聚类评分会单独降低日期与新鲜度置信度。
       const timestamp = hasDate ? parsed : nowMs;
 
       const item: HotspotItem = {
@@ -67,7 +89,10 @@ export function selectRelevantHotspotItems(
         ...(hasDate ? { publishedAt: new Date(parsed).toISOString() } : {}),
         ...(entry.summary ? { summary: entry.summary } : {}),
         trackIds: matched.trackIds,
-        matchedTerms: matched.matchedTerms,
+        matchedTerms: [...new Set([...matched.matchedTerms, ...customTerms])].slice(
+          0,
+          12,
+        ),
       };
 
       const urlKey = `u:${canonicalUrl}`;

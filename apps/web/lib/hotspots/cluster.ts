@@ -42,10 +42,15 @@ function diceSimilarity(left: Member, right: Member): number {
   return (2 * shared) / total;
 }
 
-function recencyBonus(latestMs: number, nowMs: number): number {
+function recencyScore(
+  latestMs: number,
+  nowMs: number,
+  hasKnownDate: boolean,
+): number {
+  if (!hasKnownDate) return 1;
   const ageMs = nowMs - latestMs;
-  if (ageMs <= 24 * 60 * 60 * 1000) return 4;
-  if (ageMs <= HOTSPOT_CLUSTER_TIME_WINDOW_MS) return 2;
+  if (ageMs <= 24 * 60 * 60 * 1000) return 3;
+  if (ageMs <= HOTSPOT_CLUSTER_TIME_WINDOW_MS) return 1;
   return 0;
 }
 
@@ -58,7 +63,8 @@ function clusterId(itemIds: readonly string[]): string {
 
 /**
  * 同事件聚类：标题归一化后 bigram Dice ≥0.45 且时间差 ≤72h 视为同一事件。
- * 贪心单遍分配，与簇内任一成员相似即归入，簇规模小所以全量比较可接受。
+ * 贪心单遍分配：既要与簇内成员相似，也要与该簇首个代表标题相似，
+ * 避免 A≈B、B≈C、A≉C 时由 B 把两个事件串成一个簇。
  */
 export function clusterHotspotItems(
   items: readonly HotspotItem[],
@@ -80,15 +86,25 @@ export function clusterHotspotItems(
 
   const groups: Member[][] = [];
   for (const member of members) {
-    const target = groups.find((group) =>
-      group.some(
-        (existing) =>
-          Math.abs(existing.timestamp - member.timestamp) <=
-            HOTSPOT_CLUSTER_TIME_WINDOW_MS &&
-          diceSimilarity(existing, member) >=
-            HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD,
-      ),
-    );
+    const target = groups.find((group) => {
+      const representative = group[0];
+      if (!representative) return false;
+      const matchesRepresentative =
+        Math.abs(representative.timestamp - member.timestamp) <=
+          HOTSPOT_CLUSTER_TIME_WINDOW_MS &&
+        diceSimilarity(representative, member) >=
+          HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD;
+      return (
+        matchesRepresentative &&
+        group.some(
+          (existing) =>
+            Math.abs(existing.timestamp - member.timestamp) <=
+              HOTSPOT_CLUSTER_TIME_WINDOW_MS &&
+            diceSimilarity(existing, member) >=
+              HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD,
+        )
+      );
+    });
     if (target) target.push(member);
     else groups.push([member]);
   }
@@ -113,6 +129,31 @@ export function clusterHotspotItems(
     const timestamps = group.map((member) => member.timestamp);
     const firstSeenMs = Math.min(...timestamps);
     const latestMs = Math.max(...timestamps);
+    const datedTimestamps = group.flatMap((member) =>
+      member.item.publishedAt ? [member.timestamp] : [],
+    );
+    const dateConfidence = datedTimestamps.length / group.length;
+    const recency = recencyScore(
+      datedTimestamps.length ? Math.max(...datedTimestamps) : latestMs,
+      nowMs,
+      datedTimestamps.length > 0,
+    );
+    const scoreBreakdown = {
+      sourceDiversity: sourceIds.size * 3,
+      itemVolume: group.length,
+      recency,
+      dateConfidence,
+    };
+    const heat = Object.values(scoreBreakdown).reduce(
+      (total, value) => total + value,
+      0,
+    );
+    const confidence =
+      dateConfidence >= 0.75 && sourceIds.size >= 2
+        ? "high"
+        : dateConfidence > 0 && (sourceIds.size >= 2 || heat >= 7)
+          ? "medium"
+          : "low";
     const itemIds = group.map((member) => member.item.id);
     return {
       id: clusterId(itemIds),
@@ -121,8 +162,9 @@ export function clusterHotspotItems(
       sourceCount: sourceIds.size,
       firstSeenAt: new Date(firstSeenMs).toISOString(),
       latestAt: new Date(latestMs).toISOString(),
-      heat:
-        sourceIds.size * 3 + group.length + recencyBonus(latestMs, nowMs),
+      heat,
+      scoreBreakdown,
+      confidence,
       trackIds,
     } satisfies HotspotCluster;
   });

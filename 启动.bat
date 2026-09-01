@@ -14,7 +14,7 @@ where node >nul 2>nul
 if errorlevel 1 (
   echo [缺少 Node] 正在打开「安装依赖.bat」...
   call "%~dp0安装依赖.bat"
-  set "PATH=%ProgramFiles%\nodejs;%ProgramFiles%\ffmpeg\bin;%LocalAppData%\Microsoft\WinGet\Links;%PATH%"
+  set "PATH=%ProgramFiles%\nodejs;%ProgramFiles%\ffmpeg\bin;%LocalAppData%\Microsoft\WinGet\Links;!PATH!"
   where node >nul 2>nul
   if errorlevel 1 (
     echo 仍未检测到 Node，请安装成功后重新双击本脚本。
@@ -54,12 +54,39 @@ if not exist "%~dp0node_modules\" (
   )
 )
 
-echo 正在启动 Web（http://localhost:3000 ）...
+echo.
+echo 正在检查 RSSHub（首次运行会自动安装 Docker Desktop）...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-rsshub-windows.ps1" -InstallIfMissing
+set "_rsshub_result=!errorlevel!"
+if "!_rsshub_result!"=="0" (
+  set "HOTSPOT_RSSHUB_BASE_URL=http://127.0.0.1:1200"
+) else (
+  echo [提示] RSSHub 暂未就绪，工作台仍会启动，普通 RSS 源可继续使用。
+  if "!_rsshub_result!"=="10" echo [提示] 请重启电脑后再次双击本文件。
+)
+
+set "_web_port="
+for /f "delims=" %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\find-running-workbench-windows.ps1"') do set "_web_port=%%P"
+if defined _web_port (
+  set "_web_url=http://localhost:!_web_port!"
+  echo 工作台已在运行，正在打开 !_web_url!
+  start "" "!_web_url!"
+  exit /b 0
+)
+for /f "delims=" %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\find-free-port-windows.ps1"') do set "_web_port=%%P"
+if not defined _web_port (
+  echo 未找到可用 Web 端口，请关闭其他开发服务后重试。
+  pause
+  exit /b 1
+)
+set "_web_url=http://localhost:!_web_port!"
+
+echo 正在启动 Web（!_web_url!）...
 echo 请保持本窗口不要关闭。
 echo.
 
-start "" cmd /c "timeout /t 8 /nobreak >nul & start http://localhost:3000"
-call npm run dev
+start "" /b powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0scripts\open-url-when-ready-windows.ps1" -Url "!_web_url!"
+call npm run dev --workspace @video-diagnosis/web -- --port !_web_port!
 echo.
 echo 服务已结束。
 pause

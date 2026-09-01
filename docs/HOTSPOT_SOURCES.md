@@ -7,7 +7,7 @@
 | 层 | 类型 | 是否需要额外部署 | 说明 |
 |----|------|------------------|------|
 | 官方 RSS/Atom | `rss` / `atom` / `json_feed` | 不需要 | 站点自带订阅地址，最稳定，建议作为主力 |
-| RSSHub 路由 | `rsshub` | 需要自建 RSSHub | 用于没有官方 RSS 的站点，以及微博/知乎/抖音热搜榜 |
+| RSSHub 路由 | `rsshub` | 需要自建 RSSHub | 用于没有稳定官方 RSS 的站点与热榜 |
 | 联网检索兜底 | `dashscope` | 需要可用的百炼 Key | 前两层命中太少时补充，返回的是网页而非结构化条目 |
 
 三层互不依赖：RSSHub 没起，`rsshub` 源会标记为「已跳过」；百炼 Key 无权限，兜底源会标记为「失败」。**任何单源失败都不会中断整次抓取**，页面会显示每个源的状态与原因。
@@ -41,13 +41,12 @@ docker compose -f docker-compose.rsshub.yml down -v       # 停止并清掉 redi
 
 | 内容 | 路由 |
 |------|------|
-| 微博热搜 | `/weibo/search/hot` |
+| 36氪快讯 | `/36kr/newsflashes` |
+| 微博热搜（TopHub 聚合） | `/tophub/WnBe01o371` |
 | 知乎热榜 | `/zhihu/hot` |
-| 抖音热搜 | `/douyin/hot` |
-| 百度热搜 | `/baidu/hot` |
-| B站排行榜 | `/bilibili/ranking/0` |
+| 抖音总榜（TopHub 聚合） | `/tophub/Y2KeDGQdNP` |
 
-完整路由查 [RSSHub 文档](https://docs.rsshub.app/)。热搜榜是全网热点，不分赛道，靠系统的赛道词典过滤，命中率天然低于垂直媒体，属于「捞意外收获」的源。
+以上路由是当前默认并经过本机实测的路由。微博与抖音使用 TopHub 聚合，是为了避开官方接口频繁变更和严格反爬；完整路由查 [RSSHub 文档](https://docs.rsshub.app/)。目标平台或聚合站改版后，路由仍可能失效。热搜榜是全网热点，不分赛道，靠系统的赛道词典过滤，命中率天然低于垂直媒体，属于「捞意外收获」的源。
 
 ## 源失效时怎么处理
 

@@ -11,6 +11,44 @@ export function resolveShootStatus(
   return input.shootStatus === "shot" ? "shot" : "unshot";
 }
 
+/** 只取结构化的最终口播正文，供再生成使用，避免把标题和制作指导喂回正文。 */
+export function structuredSpokenBody(
+  output: ScriptDraftOutput | null | undefined,
+): string {
+  if (!output) return "";
+  if (output.pipeline === "koubo") return output.script.trim();
+  return output.timeline
+    .map((item) => item.say.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * 从用户可编辑的完整制作包里恢复口播正文。若仍是标准导出格式，优先保留用户
+ * 在【口播稿】或“说：”行里的修改；无法可靠识别时才回退到结构化字段。
+ */
+export function editedSpokenBody(
+  editedPlainText: string | null | undefined,
+  output: ScriptDraftOutput | null | undefined,
+): string {
+  const edited = editedPlainText?.trim();
+  if (!edited) return structuredSpokenBody(output);
+
+  const kouboSection = edited.match(
+    /(?:^|\n)【口播稿】\s*\n([\s\S]*?)(?=\n【[^\n】]+】|$)/u,
+  )?.[1]?.trim();
+  if (kouboSection) return kouboSection;
+
+  const spokenLines = [...edited.matchAll(/^\s*(?:说：|说:)\s*(.+?)\s*$/gmu)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter(Boolean);
+  if (spokenLines.length) return spokenLines.join("\n");
+
+  // 没有任何制作包标题时，视为用户只粘贴/改写了正文。
+  if (!/^【[^\n】]+】/mu.test(edited)) return edited;
+  return structuredSpokenBody(output);
+}
+
 export function appendProductionGuidePlainText(
   lines: string[],
   guide: ScriptProductionGuide | undefined,

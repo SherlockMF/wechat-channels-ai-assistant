@@ -27,6 +27,9 @@ export const HOTSPOT_MIN_ITEMS_PER_SOURCE = 5;
 export const HOTSPOT_MAX_ITEMS_PER_SOURCE = 50;
 export const HOTSPOT_CLUSTER_SIMILARITY_THRESHOLD = 0.45;
 export const HOTSPOT_CLUSTER_TIME_WINDOW_MS = 72 * 60 * 60 * 1000;
+/** 允许源站时钟有少量偏差，超过 6 小时的未来时间视为脏数据。 */
+export const HOTSPOT_FUTURE_TOLERANCE_MS = 6 * 60 * 60 * 1000;
+export const HOTSPOT_MAX_REDIRECTS = 5;
 export const HOTSPOT_LLM_TIMEOUT_MS = 45_000;
 /** 送进选题模型的簇上限，控制 prompt 体积与成本。 */
 export const HOTSPOT_TOPIC_CLUSTER_LIMIT = 8;
@@ -46,8 +49,29 @@ export interface HotspotRuntimeConfig {
   freshnessDays: number;
   maxItemsPerSource: number;
   trackIds: TrackId[];
+  customKeywords: string[];
+  /** 只作为选题模型的不可信用户上下文，不参与 system 指令。 */
+  accountPositioning: string;
   sources: HotspotSourceConfig[];
   llm: HotspotLlmConfig;
+}
+
+/** 主题词保持用户写法，但用 NFKC + 忽略大小写的 key 稳定去重。 */
+export function normalizeHotspotKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value) {
+    if (typeof candidate !== "string") continue;
+    const keyword = candidate.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    if (!keyword || keyword.length > 40) continue;
+    const key = keyword.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(keyword);
+    if (result.length >= 80) break;
+  }
+  return result;
 }
 
 /** 设置页尚未提供 providers.hotspots，调用方按需覆盖，其余走内置默认值。 */

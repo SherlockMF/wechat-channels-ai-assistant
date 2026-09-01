@@ -13,7 +13,9 @@ import type {
   ViralResearchSnapshot,
   ViralResearchTopicCard,
 } from "@video-diagnosis/shared-types";
+import type { ContentProfileSettings } from "@/lib/settings/schema";
 import { preferScriptBody } from "@/lib/script-workbench/display";
+import { ensureDeliveryGuide } from "@/lib/script-workbench/delivery-guide";
 import {
   outputToPlainText,
   resolveShootStatus,
@@ -34,6 +36,8 @@ export interface ScriptGenerateRequest {
   hotspotSnapshot?: HotspotSnapshot | null;
   hotspotTopicCard?: HotspotTopicCard | null;
   hotspotItems?: HotspotItem[];
+  /** 运行时账号画像；不写回稿件 input。 */
+  contentProfile?: ContentProfileSettings;
 }
 
 const DEFAULT_EDIT_GUIDANCE = [
@@ -164,10 +168,11 @@ export function markDegradedOutput(
   if (!warnings.some((item) => item.includes("降级"))) {
     warnings.unshift(DEGRADED_WARNING);
   }
-  const next: ScriptDraftOutput = {
+  let next: ScriptDraftOutput = {
     ...output,
     gapsOrWarnings: warnings,
   };
+  next = ensureDeliveryGuide(next);
   next.plainText = outputToPlainText(next);
   return next;
 }
@@ -206,6 +211,7 @@ export function finalizeScriptOutput(
     ),
     plainText: "",
   };
+  next = ensureDeliveryGuide(next);
   next.plainText = outputToPlainText(next);
   if (options?.degraded) {
     next = markDegradedOutput(next);

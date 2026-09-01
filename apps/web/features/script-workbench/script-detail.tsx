@@ -40,6 +40,55 @@ const rewriteModeLabel = {
   deep: "深度改写",
 } as const;
 
+const paceLabel = { slow: "放慢", normal: "正常", fast: "加快" } as const;
+const emotionLabel: Record<string, string> = {
+  neutral: "中性",
+  warm: "温和",
+  confident: "坚定",
+  serious: "严肃",
+  surprised: "惊讶",
+  questioning: "提问",
+  reassuring: "安抚",
+};
+const pauseLabel = {
+  none: "不停",
+  micro: "微停",
+  short: "短停",
+  medium: "中停",
+  long: "长停",
+} as const;
+
+function deliveryGuideToText(output: ScriptDraftOutput): string {
+  const guide = output.deliveryGuide;
+  if (!guide) return "";
+  const lines = [
+    "【演讲攻略】",
+    `整体语气：${guide.overallTone}`,
+    `整体语速：${paceLabel[guide.overallPace]}`,
+    ...guide.rehearsalNotes.map((item) => `- ${item}`),
+  ];
+  for (const [blockIndex, block] of guide.blocks.entries()) {
+    lines.push("", `【第 ${blockIndex + 1} 段原文】${block.sourceText}`);
+    for (const [segmentIndex, segment] of block.segments.entries()) {
+      lines.push(
+        `${segmentIndex + 1}. 实际念法：${segment.spokenAs}`,
+        `   情绪：${emotionLabel[segment.emotion] ?? segment.emotion} ${segment.intensity}/3；语速：${paceLabel[segment.pace]}；句后：${pauseLabel[segment.pauseAfter]}${segment.breathBefore ? "；句前换气" : ""}`,
+        `   重读：${segment.emphasis.join("、") || "自然语重"}`,
+      );
+      for (const item of segment.pronunciation) {
+        lines.push(
+          `   读音：${item.text} → ${item.spokenAs}${item.needsReview ? "（需确认）" : ""}${item.note ? `；${item.note}` : ""}`,
+        );
+      }
+      if (segment.action) lines.push(`   动作：${segment.action}`);
+    }
+  }
+  if (guide.warnings.length) {
+    lines.push("", "【需确认】", ...guide.warnings.map((item) => `- ${item}`));
+  }
+  return lines.join("\n");
+}
+
 export function ScriptDetail({ scriptId }: { scriptId: string }) {
   const [draft, setDraft] = useState<ScriptDraft | null>(null);
   const [parentDraft, setParentDraft] = useState<ScriptDraft | null>(null);
@@ -186,6 +235,18 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
       setMessage("已复制全文");
     } catch {
       setError("复制失败，请手动选择全文复制");
+    }
+  }
+
+  async function copyDeliveryGuide() {
+    if (!displayOutput) return;
+    const content = deliveryGuideToText(displayOutput);
+    if (!content) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      setMessage("已复制演讲攻略");
+    } catch {
+      setError("攻略复制失败，请手动选择复制");
     }
   }
 
@@ -485,6 +546,88 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
                 ))}
               </ul>
             </>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {displayOutput?.deliveryGuide ? (
+        <Card className="space-y-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">排练与演讲攻略</h3>
+              <p className="mt-1 text-sm text-[#66736c]">
+                {displayOutput.deliveryGuide.overallTone} · 整体语速
+                {paceLabel[displayOutput.deliveryGuide.overallPace]}
+              </p>
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => void copyDeliveryGuide()}>
+              <Copy size={14} />
+              单独复制攻略
+            </Button>
+          </div>
+          {textDiverged && !showingOriginal ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              全文已手工修改；以下攻略仍绑定生成时的结构化口播，请按当前全文重新核对。
+            </p>
+          ) : null}
+          {displayOutput.deliveryGuide.rehearsalNotes.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-[#52615a]">
+              {displayOutput.deliveryGuide.rehearsalNotes.map((item, index) => (
+                <li key={`${index}-${item}`}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="space-y-4">
+            {displayOutput.deliveryGuide.blocks.map((block, blockIndex) => (
+              <section
+                key={`${block.kind}-${block.order ?? blockIndex}-${block.sourceHash}`}
+                className="space-y-3 rounded-xl border border-line p-4"
+              >
+                <div>
+                  <p className="text-xs font-semibold text-[#7a8680]">
+                    {block.kind === "script" ? "口播正文" : `时间线第 ${block.order} 段`}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{block.sourceText}</p>
+                </div>
+                {block.segments.map((segment, segmentIndex) => (
+                  <div
+                    key={`${segmentIndex}-${segment.text}`}
+                    className="space-y-2 rounded-lg bg-[#f7faf8] p-3 text-sm"
+                  >
+                    <p><span className="font-semibold">实际念法：</span>{segment.spokenAs}</p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <Badge tone="neutral">{emotionLabel[segment.emotion] ?? segment.emotion} {segment.intensity}/3</Badge>
+                      <Badge tone="neutral">{paceLabel[segment.pace]}</Badge>
+                      <Badge tone="neutral">{pauseLabel[segment.pauseAfter]}</Badge>
+                      {segment.breathBefore ? <Badge tone="info">句前换气</Badge> : null}
+                    </div>
+                    <p className="text-[#52615a]">
+                      <span className="font-semibold">重读：</span>
+                      {segment.emphasis.join("、") || "自然语重"}
+                    </p>
+                    {segment.pronunciation.length ? (
+                      <ul className="space-y-1 text-[#52615a]">
+                        {segment.pronunciation.map((item, pronunciationIndex) => (
+                          <li key={`${pronunciationIndex}-${item.text}-${item.spokenAs}`}>
+                            <span className="font-semibold">读音：</span>
+                            {item.text} → {item.spokenAs}
+                            {item.needsReview ? "（需确认）" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {segment.action ? (
+                      <p className="text-[#52615a]"><span className="font-semibold">动作：</span>{segment.action}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+          {displayOutput.deliveryGuide.warnings.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
+              {displayOutput.deliveryGuide.warnings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ul>
           ) : null}
         </Card>
       ) : null}
