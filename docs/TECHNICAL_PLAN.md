@@ -1,10 +1,14 @@
-# 视频号内容诊断助手：技术方案
+# 微信视频号 AI 创作助手：技术方案
+
+项目：**WeChat Channels AI Assistant**（原「视频号内容诊断助手」）。[返回项目说明](../README.md) · [GitHub 仓库](https://github.com/SherlockMF/wechat-channels-ai-assistant)
+
+本文主要描述数据诊断链路；脚本工作台、发布前审片与热点研究的功能入口和使用条件见项目说明。
 
 ## 1. 需求理解
 
 产品核心不是“生成一段 AI 点评”，而是形成可追溯闭环：Excel 数据进入系统后保留原值与标准化值；视频通过可解释的本地算法匹配；不确定项由人确认；队列严格按发布时间选择近期视频；Worker 从真实媒体提取元数据、音频、关键帧和时间轴；规则引擎先计算账号基线，AI 只在事实约束内补充内容诊断；最后输出可编辑、可复制、可导出的执行稿。
 
-当前 LOCAL 交付默认直接挂载用户指定的已匹配工作簿和 `videoes` 目录。源文件只读，关系以工作簿“视频名称”列为准；分析任务和编辑稿进入独立的 `.data/local-state.json`。REAL 模式仍使用 PostgreSQL 与 Worker。
+LOCAL 模式可通过 `LOCAL_SOURCE_WORKBOOK` 和 `LOCAL_VIDEO_DIRECTORY` 指定已匹配工作簿和视频目录。公开仓库不附带这些数据，未配置时仍可使用脚本工作台。源文件只读，关系以工作簿“视频名称”列为准；分析任务和编辑稿进入独立的 `.data/local-state.json`。REAL 模式仍使用 PostgreSQL 与 Worker。
 
 ## 2. 关键技术风险
 

@@ -1,4 +1,9 @@
-【请先做】把整个「视频号内容诊断助手」文件夹复制到桌面。
+微信视频号 AI 创作助手（WeChat Channels AI Assistant）
+项目地址：https://github.com/SherlockMF/wechat-channels-ai-assistant
+
+【请先做】把整个项目文件夹复制到桌面。
+GitHub 下载后的文件夹可能叫「wechat-channels-ai-assistant-main」；
+下文旧称「视频号内容诊断助手」也指该文件夹。详细说明见 README-使用说明.md。
 
 【苹果电脑】
 1. 先装 Node（只需一次）：Safari 打开 https://nodejs.org

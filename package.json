@@ -1,5 +1,15 @@
 {
-  "name": "wechat-channels-content-diagnosis",
+  "name": "wechat-channels-ai-assistant",
+  "description": "微信视频号 AI 创作助手：脚本生成、视频审片、数据分析与热点研究。Local-first AI assistant for WeChat Channels creators.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SherlockMF/wechat-channels-ai-assistant.git"
+  },
+  "homepage": "https://github.com/SherlockMF/wechat-channels-ai-assistant#readme",
+  "bugs": {
+    "url": "https://github.com/SherlockMF/wechat-channels-ai-assistant/issues"
+  },
+  "keywords": ["wechat", "wechat-channels", "ai-assistant", "video-analysis", "script-writing", "qwen"],
   "private": true,
   "version": "0.1.0",
   "workspaces": [

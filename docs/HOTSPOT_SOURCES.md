@@ -1,5 +1,7 @@
 # 研究热点：数据源与部署
 
+本文属于 **WeChat Channels AI Assistant · 微信视频号 AI 创作助手**。[返回项目说明](../README.md) · [GitHub 仓库](https://github.com/SherlockMF/wechat-channels-ai-assistant)
+
 「研究热点」从多个公开来源抓取近期条目，按赛道（智能家居/全屋智能、净水、装修水电、家电新品）过滤聚类，再结合赛道给出选题。本文说明源怎么配、RSSHub 怎么起、以及各类源失效时的表现。
 
 ## 源的三层结构

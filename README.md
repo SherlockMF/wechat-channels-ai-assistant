@@ -1,15 +1,46 @@
-# 视频号内容诊断助手
+# WeChat Channels AI Assistant · 微信视频号 AI 创作助手
 
-一个可运行的桌面端优先 MVP：默认直接读取已匹配的视频号数据工作簿与本地视频目录，按发布时间选择近期视频，运行规则/媒体/AI 诊断，并输出可编辑 Markdown 报告。上传新批次仍作为可选入口保留。
+面向微信视频号创作者的本地优先工作台，整合 **AI 脚本生成、发布前视频审片、视频数据分析、热点选题与爆款研究**。支持 Excel 数据导入、本地视频匹配，以及可编辑、可复制、可导出的 Markdown 诊断报告。
 
-## 默认真实数据源
+A local-first AI assistant for WeChat Channels creators: script writing, pre-publish video review, Excel analytics, trending topics, and viral content research. Built with Next.js, React, TypeScript, FastAPI, FFmpeg, and DashScope / Qwen.
 
-本地启动默认读取以下两个用户指定目录，不生成演示数据，也不复制源视频：
+- GitHub：[SherlockMF/wechat-channels-ai-assistant](https://github.com/SherlockMF/wechat-channels-ai-assistant)
+- 原项目名：视频号内容诊断助手；原仓库名：`shipinhao`。
+- 文档：[使用说明](README-使用说明.md) · [技术方案](docs/TECHNICAL_PLAN.md) · [热点数据源与 RSSHub](docs/HOTSPOT_SOURCES.md)
 
-- 工作簿：`outputs/019fab89-e492-7a70-88d3-a82ff1206eed/视频号动态数据明细_已匹配视频名称.xlsx`
-- 视频目录：`videoes`
+本项目是独立工具，非微信或腾讯官方产品。仓库提供程序源码，不包含个人视频、业务工作簿或 API 密钥。
 
-当前工作簿包含 81 条有效记录，其中 80 条已填写真实视频文件名；`videoes` 包含 89 个视频。源工作簿和视频保持只读，分析任务与报告编辑稿单独保存到 `.data/local-state.json`。工作簿或视频目录发生变化后，重启应用会按文件大小和修改时间重新同步，同时尽量保留仍可关联的分析结果。
+## 功能入口
+
+| 功能 | 入口 | 用途 |
+| --- | --- | --- |
+| 脚本工作台 | `/scripts` | 生成口播、跟拍大纲与拍摄剪辑指导，保留草稿与再生成记录 |
+| 发布前审片 | `/review` | 上传待发布视频，查看审片报告、版本对比与封面建议 |
+| 数据导入与匹配 | `/imports/new` | 导入视频号 Excel 数据并匹配本地视频 |
+| 数据分析 | `/analysis` | 按发布时间选择视频，运行诊断并编辑报告 |
+| 热点与爆款研究 | `/hotspots` | 结合 RSS、RSSHub 与联网检索寻找选题和参考内容 |
+| 设置 | `/settings` | 配置 AI Provider、模型与研究数据源 |
+
+## 快速开始
+
+准备 Git、Node.js **22.12+（22.x）或 24.x** 和 npm。脚本工作台无需 PostgreSQL、Worker 或样例 Excel；不配置 AI 密钥时使用明确标注的本地 mock 模板。视频媒体处理需要 FFmpeg / ffprobe，RSSHub 热榜需要 Docker。
+
+```bash
+git clone https://github.com/SherlockMF/wechat-channels-ai-assistant.git
+cd wechat-channels-ai-assistant
+npm ci
+npm run dev
+```
+
+打开 `http://localhost:3000/scripts` 体验脚本工作台；需要真实 AI 生成时，在 `/settings` 配置 Provider 与 API Key。Windows PowerShell 若阻止 `npm.ps1`，可将上述 `npm` 替换为 `npm.cmd`。
+
+也可从仓库页面选择 **Code → Download ZIP**。解压后，Windows 用户运行 `一键启动.bat`，Mac 用户按照[使用说明](README-使用说明.md)启动。Windows 一键脚本会尝试安装并启动 Docker / RSSHub；仅体验脚本工作台可使用上面的 npm 命令。
+
+## 配置自己的数据
+
+未配置本地工作簿或视频时，仍可使用脚本工作台。需要分析已有视频号数据时，可通过导入入口上传，或设置 `LOCAL_SOURCE_WORKBOOK` 和 `LOCAL_VIDEO_DIRECTORY` 指向自己的文件，配置示例见下方 LOCAL 模式。
+
+源工作簿和视频保持只读，分析任务与报告编辑稿单独保存到 `.data/local-state.json`。工作簿或视频目录发生变化后，应用会按文件大小和修改时间重新同步，同时尽量保留仍可关联的分析结果。旧交付包的默认数据路径继续兼容，新用户应显式配置自己的路径。
 
 ## 已实现的核心闭环
 
@@ -65,16 +96,16 @@ Sites / D1 云端路径支持脚本草稿持久化；PostgreSQL（`APP_MODE=REAL
 
 ## 运行模式
 
-### LOCAL（默认，真实本地数据）
+### LOCAL（默认，本地存储）
 
-不依赖 PostgreSQL 或 AI 密钥。数据事实直接来自上述真实工作簿，播放器直接读取 `videoes` 中的真实视频；点击分析后运行本地规则诊断，页面明确标记“本地规则诊断”，不会冒充 AI 内容理解。
+不依赖 PostgreSQL。配置工作簿和视频目录后，数据事实来自用户提供的工作簿，播放器读取本地视频；点击分析后运行本地规则诊断，页面明确标记“本地规则诊断”。AI 脚本等功能的 Provider 单独配置。
 
 ```powershell
 npm.cmd install
 npm.cmd run dev
 ```
 
-打开 `http://localhost:3000`。LOCAL 模式已有代码内默认路径，不需要先创建 `.env`；根目录 `.env.example` 主要供 Docker Compose 和环境变量清单参考。
+打开 `http://localhost:3000`。首次体验脚本工作台不需要创建 `.env`；根目录 `.env.example` 可作为环境变量清单参考。
 
 如需换目录，可在环境变量中覆盖：
 
@@ -163,4 +194,9 @@ python -m pytest apps/worker/tests
 - `retention_datasets` 与 `retention_points` 仅完成数据库预留。
 - 未实现微信自动化、扩展采集或自动发布。
 
-更详细的架构、风险和数据流见 [技术方案](docs/TECHNICAL_PLAN.md)。
+## 文档与反馈
+
+- [使用说明](README-使用说明.md)：Windows / Mac 启动步骤与常见问题。
+- [技术方案](docs/TECHNICAL_PLAN.md)：架构、数据流与部署限制。
+- [热点数据源与 RSSHub](docs/HOTSPOT_SOURCES.md)：研究来源、抓取与刷新配置。
+- [GitHub Issues](https://github.com/SherlockMF/wechat-channels-ai-assistant/issues)：提交问题时请附系统版本、复现步骤和脱敏后的错误信息。
