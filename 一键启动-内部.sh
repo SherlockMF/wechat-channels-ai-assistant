@@ -9,7 +9,7 @@ xattr -cr "$ROOT" 2>/dev/null || true
 chmod +x "$ROOT"/*.command "$ROOT"/*.sh 2>/dev/null || true
 
 echo "========================================"
-echo " 视频号内容诊断助手 · 一键启动"
+echo " 微信视频号 AI 创作助手 · 一键启动"
 echo "========================================"
 echo
 echo "请不要关闭本窗口。"

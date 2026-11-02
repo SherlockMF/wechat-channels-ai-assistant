@@ -4,12 +4,11 @@
 
 项目英文名：WeChat Channels AI Assistant
 GitHub：https://github.com/SherlockMF/wechat-channels-ai-assistant
-原项目名：视频号内容诊断助手；原仓库名：shipinhao。
 
 从 GitHub 获取：打开仓库 → Code → Download ZIP → 解压。
 GitHub ZIP 默认文件夹名为 wechat-channels-ai-assistant-main；克隆目录默认为
-wechat-channels-ai-assistant。下文「视频号内容诊断助手」均指你解压后的项目文件夹。
-若要使用下文按中文文件夹名创建 Mac 桌面快捷方式的命令，请先将文件夹改为该中文名。
+wechat-channels-ai-assistant。为与下文路径示例一致，请将解压后的文件夹命名为
+wechat-channels-ai-assistant。
 公开仓库不包含样例 Excel、个人视频或 API Key；无需这些数据也可先体验脚本工作台。
 开发者命令行安装与配置说明见 README.md。
 
@@ -21,8 +20,8 @@ wechat-channels-ai-assistant。下文「视频号内容诊断助手」均指你�
 〇、解压之后第一件事（Mac / Windows 都要做）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. 双击解压「视频号内容诊断助手-交付包.zip」
-2. 得到文件夹「视频号内容诊断助手」
+1. 解压从 GitHub 下载的 ZIP 文件
+2. 将解压后的文件夹命名为「wechat-channels-ai-assistant」
 3. 【必须】把整个文件夹复制到「桌面」
    - 右键文件夹 → 复制
    - 打开桌面空白处 → 右键 → 粘贴
@@ -55,7 +54,7 @@ wechat-channels-ai-assistant。下文「视频号内容诊断助手」均指你�
 
 【然后启动】
 
-第 1 步：打开桌面 →「视频号内容诊断助手」→「苹果电脑请看这里」
+第 1 步：打开桌面 →「wechat-channels-ai-assistant」→「苹果电脑请看这里」
 
 第 2 步：打开「终端」
   1) 按键盘：Command（⌘）+ 空格
@@ -69,7 +68,7 @@ wechat-channels-ai-assistant。下文「视频号内容诊断助手」均指你�
   注意：bash 是英文；后面一定有空格；光标停在空格后。
 
 第 4 步：把启动文件拖进终端
-  1) 打开：桌面 → 视频号内容诊断助手 → 苹果电脑请看这里
+  1) 打开：桌面 → wechat-channels-ai-assistant → 苹果电脑请看这里
   2) 找到：请右键点我启动.command
   3) 按住它，拖到终端窗口里松开
   4) 终端会出现很长一串路径（正常）
@@ -85,7 +84,7 @@ wechat-channels-ai-assistant。下文「视频号内容诊断助手」均指你�
   成功后桌面可能出现「视频号助手」
   若没有，可再开一个终端窗口，整段粘贴下面内容后回车：
 
-ROOT="$(ls -d ~/Desktop/视频号内容诊断助手* 2>/dev/null | head -n 1)" && cat > ~/Desktop/视频号助手.command <<EOF
+ROOT="$HOME/Desktop/wechat-channels-ai-assistant" && cat > ~/Desktop/视频号助手.command <<EOF
 #!/bin/bash
 cd "$ROOT" || exit 1
 [ -x /opt/homebrew/bin/brew ] && eval "\$(/opt/homebrew/bin/brew shellenv)"
@@ -165,13 +164,13 @@ A：1) 必须用桌面上的副本（路径不要含 WeChat）
 
 Q：自动安装失败 / Homebrew / git fetch 失败
 A：正常。请手动装 Node（nodejs.org 绿色按钮），新开终端后再 bash 启动。
-   新版不再自动装 Homebrew。
+   启动脚本不自动安装 Homebrew。
 
 Q：一堆 npm warn
 A：可忽略。能打开网页就行。
 
 Q：生成脚本报找不到 xlsx
-A：请用最新交付包并重新启动。脚本生成不依赖那份样例 Excel。
+A：脚本生成不依赖 Excel。请确认进入「脚本工作台」；数据分析需要配置自己的工作簿路径。若脚本生成仍报错，请记录错误信息并通过 GitHub Issues 反馈。
 
 Q：网页打不开
 A：确认黑窗口还在；查看黑窗口显示的实际网址；等首次安装结束。

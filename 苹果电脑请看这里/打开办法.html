@@ -79,7 +79,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>视频号内容诊断助手<br />从解压到使用 · 完整步骤</h1>
+    <h1>微信视频号 AI 创作助手<br />从解压到使用 · 完整步骤</h1>
     <p class="sub">请从第 0 步开始，一步一步做。遇到红色报错时，先看文末「常见问题」。</p>
 
     <div class="toc">
@@ -99,16 +99,16 @@
     <div class="card warn" id="s0">
       <h2><span class="num">0</span>解压，并放到正确位置</h2>
       <ol>
-        <li>找到压缩包：<span class="big">视频号内容诊断助手-交付包.zip</span></li>
+        <li>从 <a href="https://github.com/SherlockMF/wechat-channels-ai-assistant">GitHub 仓库</a>选择 Code → Download ZIP</li>
         <li>双击解压（或右键 → 解压 / 解压缩）。</li>
-        <li>解压后应得到文件夹：<span class="big">视频号内容诊断助手</span></li>
+        <li>将解压后的文件夹命名为：<span class="big">wechat-channels-ai-assistant</span></li>
         <li class="big">务必把整个文件夹复制到「桌面」再使用。</li>
       </ol>
       <p><strong>为什么必须放到桌面？</strong><br />
       如果文件还在微信/QQ/网盘的下载缓存目录里，系统常会拦截或报 Permission denied。桌面上最稳。</p>
       <p><strong>怎么复制到桌面：</strong></p>
       <ol>
-        <li>点选整个「视频号内容诊断助手」文件夹</li>
+        <li>点选整个「wechat-channels-ai-assistant」文件夹</li>
         <li>右键 → <span class="big">复制</span></li>
         <li>打开<span class="big">桌面</span>（空白处）</li>
         <li>右键 → <span class="big">粘贴</span></li>
@@ -155,7 +155,7 @@ npm -v</div>
     <div class="card" id="mac1">
       <h2><span class="num">1</span>打开说明文件夹</h2>
       <ol>
-        <li>打开桌面上的 <span class="big">视频号内容诊断助手</span></li>
+        <li>打开桌面上的 <span class="big">wechat-channels-ai-assistant</span></li>
         <li>再打开里面的 <span class="big">苹果电脑请看这里</span></li>
         <li>你会看到：
           <ul>
@@ -192,14 +192,14 @@ npm -v</div>
     <div class="card ok">
       <h2><span class="num">4</span>把启动文件拖进终端</h2>
       <ol>
-        <li>回到访达，打开：桌面 → 视频号内容诊断助手 → <span class="big">苹果电脑请看这里</span></li>
+        <li>回到访达，打开：桌面 → wechat-channels-ai-assistant → <span class="big">苹果电脑请看这里</span></li>
         <li>找到 <span class="big">请右键点我启动.command</span></li>
         <li>用鼠标<strong>按住它，拖到终端窗口里松开</strong></li>
         <li>终端里会出现一长串路径，这是正常的</li>
         <li>按<span class="big">回车</span></li>
       </ol>
       <p>正确示例（路径因人而异，但前面必须有 bash）：</p>
-      <div class="block">bash /Users/你的用户名/Desktop/视频号内容诊断助手/苹果电脑请看这里/请右键点我启动.command</div>
+      <div class="block">bash /Users/你的用户名/Desktop/wechat-channels-ai-assistant/苹果电脑请看这里/请右键点我启动.command</div>
     </div>
 
     <div class="card">
@@ -221,7 +221,7 @@ npm -v</div>
       <h2><span class="num">6</span>（推荐）生成下次一键图标</h2>
       <p>第一次成功跑起来后，脚本会尝试在桌面创建 <span class="big">视频号助手.command</span>。</p>
       <p>若桌面上没有，可在终端<strong>再开一个新窗口</strong>，整段粘贴下面内容后回车：</p>
-      <div class="block">ROOT="$(ls -d ~/Desktop/视频号内容诊断助手* 2>/dev/null | head -n 1)" &amp;&amp; cat &gt; ~/Desktop/视频号助手.command &lt;&lt;EOF
+      <div class="block">ROOT="$HOME/Desktop/wechat-channels-ai-assistant" &amp;&amp; cat &gt; ~/Desktop/视频号助手.command &lt;&lt;EOF
 #!/bin/bash
 cd "$ROOT" || exit 1
 [ -x /opt/homebrew/bin/brew ] &amp;&amp; eval "\$(/opt/homebrew/bin/brew shellenv)"
@@ -238,7 +238,7 @@ chmod +x ~/Desktop/视频号助手.command &amp;&amp; echo "已创建：桌面�
 
     <div class="card ok">
       <h2><span class="num">1</span>放到桌面</h2>
-      <p>同样把整个「视频号内容诊断助手」文件夹复制到桌面。</p>
+      <p>同样把整个「wechat-channels-ai-assistant」文件夹复制到桌面。</p>
     </div>
 
     <div class="card ok">
@@ -291,10 +291,10 @@ chmod +x ~/Desktop/视频号助手.command &amp;&amp; echo "已创建：桌面�
 
     <div class="card warn">
       <h2>关于红色 ENOENT / 找不到 xlsx</h2>
-      <p>如果提示找不到 <span class="mono">视频号动态数据明细_已匹配视频名称.xlsx</span>：</p>
+      <p>如果提示找不到工作簿：</p>
       <ul>
-        <li>新版交付包已处理：没有样例 Excel 也能生成脚本</li>
-        <li>请确认你用的是最新解压包，并重新启动后再试</li>
+        <li>脚本工作台不依赖 Excel，可以直接生成脚本</li>
+        <li>请确认当前使用的是「脚本工作台」，而非需要工作簿的数据分析功能</li>
         <li>「数据匹配」若要用真实表格，需自行准备 Excel/视频再配置路径</li>
       </ul>
     </div>
@@ -358,7 +358,7 @@ chmod +x ~/Desktop/视频号助手.command &amp;&amp; echo "已创建：桌面�
 
     <div class="card">
       <h2>Q5：点「生成脚本」报找不到 Excel</h2>
-      <p>请使用最新交付包并重新启动。脚本生成不需要那份样例 Excel。</p>
+      <p>脚本生成不依赖 Excel。请确认进入「脚本工作台」；若仍报错，请记录错误信息并通过 GitHub Issues 反馈。</p>
     </div>
 
     <div class="card">
@@ -372,7 +372,7 @@ chmod +x ~/Desktop/视频号助手.command &amp;&amp; echo "已创建：桌面�
 
     <div class="card bad">
       <h2>Q7：自动安装失败 / Homebrew / git fetch 报错</h2>
-      <p>这是网络问题。新版脚本<strong>不再自动装 Homebrew</strong>。</p>
+      <p>启动脚本<strong>不自动安装 Homebrew</strong>。请先手动安装 Node，再启动应用。</p>
       <ol>
         <li>用 Safari 打开 nodejs.org，装绿色 macOS 安装程序</li>
         <li>关掉旧终端，新开终端，执行 <span class="mono">node -v</span> 确认成功</li>

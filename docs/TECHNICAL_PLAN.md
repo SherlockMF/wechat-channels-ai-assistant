@@ -1,6 +1,6 @@
 # 微信视频号 AI 创作助手：技术方案
 
-项目：**WeChat Channels AI Assistant**（原「视频号内容诊断助手」）。[返回项目说明](../README.md) · [GitHub 仓库](https://github.com/SherlockMF/wechat-channels-ai-assistant)
+项目：**WeChat Channels AI Assistant**。[返回项目说明](../README.md) · [GitHub 仓库](https://github.com/SherlockMF/wechat-channels-ai-assistant)
 
 本文主要描述数据诊断链路；脚本工作台、发布前审片与热点研究的功能入口和使用条件见项目说明。
 

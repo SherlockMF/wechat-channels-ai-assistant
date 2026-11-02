@@ -24,7 +24,7 @@ cat > "$DESKTOP_LAUNCHER" <<EOF
 #!/bin/bash
 export PATH="/usr/local/bin:/opt/homebrew/bin:\$PATH"
 cd $(printf '%q' "$ROOT") || exit 1
-echo "正在启动视频号内容诊断助手…"
+echo "正在启动微信视频号 AI 创作助手…"
 echo "请不要关闭本窗口。"
 (sleep 5; open "http://localhost:3000") &
 npm run dev
@@ -33,7 +33,7 @@ chmod +x "$DESKTOP_LAUNCHER" 2>/dev/null || true
 xattr -cr "$DESKTOP_LAUNCHER" 2>/dev/null || true
 
 echo "========================================"
-echo " 视频号内容诊断助手"
+echo " 微信视频号 AI 创作助手"
 echo "========================================"
 echo "目录: $ROOT"
 echo "已在桌面创建「视频号助手.command」"

@@ -5,7 +5,6 @@
 A local-first AI assistant for WeChat Channels creators: script writing, pre-publish video review, Excel analytics, trending topics, and viral content research. Built with Next.js, React, TypeScript, FastAPI, FFmpeg, and DashScope / Qwen.
 
 - GitHub：[SherlockMF/wechat-channels-ai-assistant](https://github.com/SherlockMF/wechat-channels-ai-assistant)
-- 原项目名：视频号内容诊断助手；原仓库名：`shipinhao`。
 - 文档：[使用说明](README-使用说明.md) · [技术方案](docs/TECHNICAL_PLAN.md) · [热点数据源与 RSSHub](docs/HOTSPOT_SOURCES.md)
 
 本项目是独立工具，非微信或腾讯官方产品。仓库提供程序源码，不包含个人视频、业务工作簿或 API 密钥。
@@ -40,7 +39,7 @@ npm run dev
 
 未配置本地工作簿或视频时，仍可使用脚本工作台。需要分析已有视频号数据时，可通过导入入口上传，或设置 `LOCAL_SOURCE_WORKBOOK` 和 `LOCAL_VIDEO_DIRECTORY` 指向自己的文件，配置示例见下方 LOCAL 模式。
 
-源工作簿和视频保持只读，分析任务与报告编辑稿单独保存到 `.data/local-state.json`。工作簿或视频目录发生变化后，应用会按文件大小和修改时间重新同步，同时尽量保留仍可关联的分析结果。旧交付包的默认数据路径继续兼容，新用户应显式配置自己的路径。
+源工作簿和视频保持只读，分析任务与报告编辑稿单独保存到 `.data/local-state.json`。工作簿或视频目录发生变化后，应用会按文件大小和修改时间重新同步，同时尽量保留仍可关联的分析结果。请显式配置自己的工作簿和视频路径。
 
 ## 已实现的核心闭环
 

@@ -3,8 +3,8 @@ import "@/app/globals.css";
 import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "视频号内容诊断助手",
-  description: "从账号数据和视频内容出发，生成可执行的短视频修改清单。",
+  title: "微信视频号 AI 创作助手",
+  description: "面向微信视频号创作者的 AI 脚本生成、发布前审片、数据分析与热点研究工作台。",
 };
 
 export default function RootLayout({

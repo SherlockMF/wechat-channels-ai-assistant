@@ -46,10 +46,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
             <span>
               <span className="block font-display text-base font-semibold leading-none">
-                视频号内容诊断助手
+                微信视频号 AI 创作助手
               </span>
               <span className="mt-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-[#78857e]">
-                Content Review Desk
+                WeChat Channels AI Assistant
               </span>
             </span>
           </Link>

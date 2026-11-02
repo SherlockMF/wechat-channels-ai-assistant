@@ -4,7 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ========================================
-echo  视频号内容诊断助手 - 启动（本机）
+echo  微信视频号 AI 创作助手 - 启动（本机）
 echo ========================================
 echo.
 
