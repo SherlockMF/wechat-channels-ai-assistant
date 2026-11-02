@@ -80,7 +80,7 @@ describe("normalizeRsshubBaseUrl", () => {
 });
 
 describe("applyHotspotEnvironment", () => {
-  it("设置未填写时使用一键启动注入的 RSSHub 地址", () => {
+  it("设置未填写时使用环境变量中的 RSSHub 地址", () => {
     expect(
       applyHotspotEnvironment(
         { rsshubBaseUrl: "" },

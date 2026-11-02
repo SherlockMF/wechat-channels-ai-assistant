@@ -52,7 +52,7 @@ async function checkCommand(bin: string): Promise<HealthCheck> {
       label,
       ok: false,
       message:
-        "未在当前运行环境中找到。请双击「安装依赖」脚本安装 FFmpeg，或确认已加入 PATH。",
+        "未在当前运行环境中找到。请确认 FFmpeg 与 ffprobe 已安装并加入 PATH。",
     };
   }
 }
@@ -64,7 +64,7 @@ async function checkWorker(): Promise<HealthCheck> {
       label: "Worker",
       ok: true,
       message:
-        "当前为本地 LOCAL 模式，不强制 Worker。本机请用「启动」脚本；可选 Docker 见「启动-Docker」。",
+        "当前为本地 LOCAL 模式，不要求独立 Worker。",
     };
   }
 
@@ -78,7 +78,7 @@ async function checkWorker(): Promise<HealthCheck> {
         id: "worker",
         label: "Worker",
         ok: false,
-        message: `探活失败 HTTP ${response.status}。Docker 路径请确认 compose 中 worker 正常。`,
+        message: `探活失败 HTTP ${response.status}。请检查 Worker 服务状态。`,
       };
     }
     return {
@@ -92,7 +92,7 @@ async function checkWorker(): Promise<HealthCheck> {
       id: "worker",
       label: "Worker",
       ok: false,
-      message: "无法连接 Worker（仅 REAL/Docker 全栈需要）。",
+      message: "无法连接 Worker，请检查服务状态与 WORKER_URL 配置。",
     };
   }
 }
@@ -261,7 +261,7 @@ export async function runHealthChecks(): Promise<HealthCheck[]> {
       label: "Web",
       ok: true,
       message: isRealMode()
-        ? "服务进程正常（REAL / Docker）"
+        ? "服务进程正常（REAL）"
         : "服务进程正常（本地 LOCAL 开发）",
     },
     postgres,

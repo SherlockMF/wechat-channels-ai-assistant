@@ -71,7 +71,7 @@ export function HotspotSection({
           <h3 className="text-sm font-bold text-ink">研究热点</h3>
           <p className="mt-1 text-xs leading-5 text-[#78857e]">
             从多个新闻源与热榜抓取近期条目，按赛道过滤后给出选题建议。官方 RSS
-            无需额外部署；一键启动会自动接入本机 RSSHub，用于 36氪、微博、知乎、抖音等来源。
+            可直接读取；36氪、微博、知乎、抖音等 RSSHub 来源需要配置可用的服务地址。
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -104,7 +104,7 @@ export function HotspotSection({
             <span className="text-xs text-coral">{rsshubHint}</span>
           ) : (
             <span className="text-xs text-[#78857e]">
-              一键启动检测到本机 RSSHub 后可留空；手工填写的地址优先
+              填写可用的 RSSHub 地址；留空时使用环境配置，未配置则跳过相关来源
             </span>
           )}
         </label>
