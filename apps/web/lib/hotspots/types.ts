@@ -15,7 +15,7 @@ export const HOTSPOT_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
 export const HOTSPOT_FETCH_BUDGET_MS = 20_000;
 export const HOTSPOT_SNAPSHOT_RETENTION = 30;
 export const HOTSPOT_MAX_ITEMS = 120;
-export const HOTSPOT_MAX_CLUSTERS = 20;
+export const HOTSPOT_MAX_CLUSTERS = HOTSPOT_MAX_ITEMS;
 export const HOTSPOT_MAX_TOPIC_CARDS = 12;
 export const HOTSPOT_MAX_CARDS_PER_CLUSTER = 2;
 /** 免责说明只留人话，技术原因一律进 degradedReason。 */
@@ -32,8 +32,8 @@ export const HOTSPOT_CLUSTER_TIME_WINDOW_MS = 72 * 60 * 60 * 1000;
 export const HOTSPOT_FUTURE_TOLERANCE_MS = 6 * 60 * 60 * 1000;
 export const HOTSPOT_MAX_REDIRECTS = 5;
 export const HOTSPOT_LLM_TIMEOUT_MS = 45_000;
-/** 送进选题模型的簇上限，控制 prompt 体积与成本。 */
-export const HOTSPOT_TOPIC_CLUSTER_LIMIT = 8;
+/** 全部已限量的候选参与语义匹配，不能只按关键词/热度提前截取八簇。 */
+export const HOTSPOT_TOPIC_CLUSTER_LIMIT = HOTSPOT_MAX_CLUSTERS;
 
 export interface HotspotLlmConfig {
   enabled: boolean;

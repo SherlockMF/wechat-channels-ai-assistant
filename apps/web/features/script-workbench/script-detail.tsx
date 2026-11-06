@@ -19,6 +19,7 @@ import { exportMarkdownAsPdf } from "@/lib/reports/export-pdf";
 import { shouldShowViralPlan } from "@/lib/script-workbench/viral-plan";
 import { ScriptResearchPanel } from "@/features/script-workbench/script-research-panel";
 import { ScriptEditAssist } from "@/features/script-workbench/script-edit-assist";
+import { DeliveryGuidePanel } from "@/features/script-workbench/delivery-guide-panel";
 import { ScriptTeleprompter } from "@/features/script-workbench/script-teleprompter";
 import { useScriptAutosave } from "@/features/script-workbench/use-script-autosave";
 import { captureSelection, extractPrompterText, type ScriptSelection } from "@/lib/script-workbench/editing";
@@ -66,9 +67,10 @@ const pauseLabel = {
 function deliveryGuideToText(guide: ScriptDeliveryGuide | null): string {
   if (!guide) return "";
   const lines = [
-    "【演讲攻略】",
+    guide.source === "ai" ? "【AI 口播演绎指导】" : guide.source === "rules" ? "【基础规则提示（非 AI）】" : "【演讲攻略】",
     `整体语气：${guide.overallTone}`,
-    `整体语速：${paceLabel[guide.overallPace]}`,
+    `语速节奏：${guide.paceHint || paceLabel[guide.overallPace]}`,
+    ...(guide.cameraNote ? [`出镜提醒：${guide.cameraNote}`] : []),
     ...guide.rehearsalNotes.map((item) => `- ${item}`),
   ];
   for (const [blockIndex, block] of guide.blocks.entries()) {
@@ -76,7 +78,8 @@ function deliveryGuideToText(guide: ScriptDeliveryGuide | null): string {
     for (const [segmentIndex, segment] of block.segments.entries()) {
       lines.push(
         `${segmentIndex + 1}. 实际念法：${segment.spokenAs}`,
-        `   情绪：${emotionLabel[segment.emotion] ?? segment.emotion} ${segment.intensity}/3；语速：${paceLabel[segment.pace]}；句后：${pauseLabel[segment.pauseAfter]}${segment.breathBefore ? "；句前换气" : ""}`,
+        `   语气：${segment.toneHint || `${emotionLabel[segment.emotion] ?? segment.emotion} ${segment.intensity}/3；语速：${paceLabel[segment.pace]}`}`,
+        `   停顿：${segment.pauseHint || (guide.source === "ai" ? "自然衔接" : pauseLabel[segment.pauseAfter])}`,
         `   重读：${segment.emphasis.join("、") || "自然语重"}`,
       );
       for (const item of segment.pronunciation) {
@@ -84,6 +87,7 @@ function deliveryGuideToText(guide: ScriptDeliveryGuide | null): string {
           `   读音：${item.text} → ${item.spokenAs}${item.needsReview ? "（需确认）" : ""}${item.note ? `；${item.note}` : ""}`,
         );
       }
+      if (segment.expression) lines.push(`   表情：${segment.expression}`);
       if (segment.action) lines.push(`   动作：${segment.action}`);
     }
   }
@@ -294,7 +298,7 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
     }
   }
 
-  async function updateDeliveryGuide() {
+  async function updateDeliveryGuide(mode: "ai" | "basic" = "ai") {
     const submitted = plainText;
     guideRequest.current?.abort();
     const controller = new AbortController();
@@ -302,9 +306,11 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
     setGuideBusy(true);
     setGuideError("");
     try {
+      if (mode === "ai" && !(await autosave.flush())) throw new Error("正文尚未保存成功，请先保存后再生成口播提示");
+      if (controller.signal.aborted) return;
       const response = await fetch(`/api/scripts/${encodeURIComponent(scriptId)}/delivery-guide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: submitted }), signal: controller.signal,
+        body: JSON.stringify({ text: submitted, mode }), signal: controller.signal,
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "生成口播提示失败");
@@ -644,94 +650,15 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
         </Card>
       ) : null}
 
-        <Card className="space-y-5 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 id="delivery-guide" className="scroll-mt-6 font-semibold">口播语气／演讲提示</h3>
-              <p className="mt-1 text-xs text-[#66736c]">排练与演讲攻略 · 逐句语气、重读、停顿、换气与动作</p>
-              {displayGuide ? (
-              <p className="mt-1 text-sm text-[#66736c]">
-                {displayGuide.overallTone} · 整体语速
-                {paceLabel[displayGuide.overallPace]}
-              </p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-2">
-            {!showingOriginal ? <Button size="sm" variant="secondary" disabled={guideBusy || Boolean(autosave.recovery) || !extractPrompterText(displayPlainText)} onClick={() => void updateDeliveryGuide()}>{guideBusy ? "正在生成提示…" : "按当前口播更新提示"}</Button> : null}
-            <Button size="sm" variant="secondary" disabled={!displayGuide} onClick={() => void copyDeliveryGuide()}>
-              <Copy size={14} />
-              单独复制攻略
-            </Button>
-            </div>
-          </div>
-          {guideError ? <p role="alert" className="text-sm text-coral">{guideError}</p> : null}
-          {!displayGuide ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {extractPrompterText(displayPlainText) ? "当前正文尚无匹配提示，或改稿后提示已过期。点击“按当前口播更新提示”即可补齐；生成基础提示不会调用 AI 或改写正文。" : "当前没有可排练的口播正文，请先填写口播稿。"}
-            </p>
-          ) : null}
-          {displayGuide ? <>
-          {displayGuide.rehearsalNotes.length ? (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-[#52615a]">
-              {displayGuide.rehearsalNotes.map((item, index) => (
-                <li key={`${index}-${item}`}>{item}</li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="space-y-4">
-            {displayGuide.blocks.map((block, blockIndex) => (
-              <section
-                key={`${block.kind}-${block.order ?? blockIndex}-${block.sourceHash}`}
-                className="space-y-3 rounded-xl border border-line p-4"
-              >
-                <div>
-                  <p className="text-xs font-semibold text-[#7a8680]">
-                    {block.kind === "script" ? "口播正文" : `时间线第 ${block.order} 段`}
-                  </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{block.sourceText}</p>
-                </div>
-                {block.segments.map((segment, segmentIndex) => (
-                  <div
-                    key={`${segmentIndex}-${segment.text}`}
-                    className="space-y-2 rounded-lg bg-[#f7faf8] p-3 text-sm"
-                  >
-                    <p><span className="font-semibold">实际念法：</span>{segment.spokenAs}</p>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <Badge tone="neutral">{emotionLabel[segment.emotion] ?? segment.emotion} {segment.intensity}/3</Badge>
-                      <Badge tone="neutral">{paceLabel[segment.pace]}</Badge>
-                      <Badge tone="neutral">{pauseLabel[segment.pauseAfter]}</Badge>
-                      {segment.breathBefore ? <Badge tone="info">句前换气</Badge> : null}
-                    </div>
-                    <p className="text-[#52615a]">
-                      <span className="font-semibold">重读：</span>
-                      {segment.emphasis.join("、") || "自然语重"}
-                    </p>
-                    {segment.pronunciation.length ? (
-                      <ul className="space-y-1 text-[#52615a]">
-                        {segment.pronunciation.map((item, pronunciationIndex) => (
-                          <li key={`${pronunciationIndex}-${item.text}-${item.spokenAs}`}>
-                            <span className="font-semibold">读音：</span>
-                            {item.text} → {item.spokenAs}
-                            {item.needsReview ? "（需确认）" : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {segment.action ? (
-                      <p className="text-[#52615a]"><span className="font-semibold">动作：</span>{segment.action}</p>
-                    ) : null}
-                  </div>
-                ))}
-              </section>
-            ))}
-          </div>
-          {displayGuide.warnings.length ? (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
-              {displayGuide.warnings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
-            </ul>
-          ) : null}
-          </> : null}
-        </Card>
+      <DeliveryGuidePanel
+        guide={displayGuide} busy={guideBusy} error={guideError}
+        canGenerate={Boolean(extractPrompterText(displayPlainText)) && !autosave.recovery}
+        readOnly={showingOriginal}
+        onGenerate={(mode) => void updateDeliveryGuide(mode)}
+        onCopy={() => void copyDeliveryGuide()}
+        onCancel={() => { guideRequest.current?.abort(); setGuideBusy(false); }}
+        onPrompter={() => setPrompterOpen(true)}
+      />
 
       {showViralPlan && displayOutput?.viralPlan ? (
         <Card className="space-y-5 p-5">

@@ -81,6 +81,7 @@ export function emptyStudioState(): StudioState {
 }
 
 export interface CreatorContextSnapshot {
+  topic?: Pick<CreatorTopic, "id" | "subject" | "note" | "source"> | null;
   capturedAt: string;
   styleDigest: string;
   styleExcerpts: string[];

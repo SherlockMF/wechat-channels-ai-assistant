@@ -5,6 +5,7 @@ import type {
   ScriptDeliveryGuide,
   ScriptDraftOutput,
 } from "@video-diagnosis/shared-types";
+import { scriptDeliveryGuideSchema } from "@video-diagnosis/shared-types";
 export { structuredSpokenBody } from "@/lib/script-workbench/plain-text";
 
 type DeliveryBlock = ScriptDeliveryGuide["blocks"][number];
@@ -18,7 +19,7 @@ const LETTERS: Record<string, string> = {
   V: "维", W: "达布流", X: "艾克斯", Y: "歪", Z: "贼德",
 };
 
-function hashSource(text: string): string {
+export function hashSource(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
@@ -197,7 +198,9 @@ export function ensureDeliveryGuide(output: ScriptDraftOutput): ScriptDraftOutpu
   return {
     ...output,
     deliveryGuide: {
+      ...output.deliveryGuide,
       version: 1,
+      source: usedFallback ? "rules" : output.deliveryGuide?.source,
       overallTone: output.deliveryGuide?.overallTone?.trim() || "自然、清楚、可信",
       overallPace: output.deliveryGuide?.overallPace ?? "normal",
       rehearsalNotes: output.deliveryGuide?.rehearsalNotes?.length
@@ -207,6 +210,14 @@ export function ensureDeliveryGuide(output: ScriptDraftOutput): ScriptDraftOutpu
       warnings: warnings.slice(0, 8),
     },
   };
+}
+
+export function savedRehearsalGuide(guide: ScriptDeliveryGuide | null | undefined, text: string): ScriptDeliveryGuide | null {
+  const parsed = scriptDeliveryGuideSchema.safeParse(guide);
+  if (!parsed.success || parsed.data.documentHash !== hashSource(text)) return null;
+  const spoken = extractPrompterText(text);
+  if (parsed.data.blocks.map(block => block.segments.map(segment => segment.text).join("")).join("\n").replace(/\s/g, "") !== spoken.replace(/\s/g, "")) return null;
+  return parsed.data;
 }
 
 /** Read-time compatibility for every historical/edited draft; never mutate its output. */

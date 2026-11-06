@@ -1,3 +1,4 @@
+import { researchSnapshotDatabase, readCloudResearchSnapshot, latestCloudResearchSnapshotId, writeCloudResearchSnapshot } from "@/lib/data/research-snapshot-store";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +16,7 @@ import {
 const snapshotIdPattern = /^hs-[a-f0-9]{16}-[a-f0-9]{24}$/u;
 const indexLocks = new Map<string, Promise<void>>();
 /** 抓取与聚类口径变化时旧快照不该被复用。 */
-const HOTSPOT_POLICY_VERSION = 4;
+const HOTSPOT_POLICY_VERSION = 5;
 
 interface CacheIndex {
   version: 1;
@@ -172,6 +173,13 @@ export async function readHotspotSnapshot(
   const owner = normalizeOwnerId(ownerId);
   const filePath = ownerSnapshotPath(owner, snapshotId, options.storageRoot);
   if (!filePath) return null;
+  const db = researchSnapshotDatabase();
+  if (db) {
+    const raw = await readCloudResearchSnapshot(db, "hotspots", owner, snapshotId);
+    if (raw === null) return null;
+    const parsed = hotspotSnapshotSchema.parse(raw);
+    return parsed.ownerId === owner ? parsed : null;
+  }
   try {
     const parsed = hotspotSnapshotSchema.parse(
       JSON.parse(await readFile(filePath, "utf8")) as unknown,
@@ -188,6 +196,11 @@ export async function readLatestHotspotSnapshot(
   options: { storageRoot?: string } = {},
 ): Promise<HotspotSnapshot | null> {
   const owner = normalizeOwnerId(ownerId);
+  const db = researchSnapshotDatabase();
+  if (db) {
+    const id = await latestCloudResearchSnapshotId(db, "hotspots", owner, configKey);
+    return id ? readHotspotSnapshot(owner, id, options) : null;
+  }
   const indexPath = path.join(
     ownerDirectory(owner, options.storageRoot),
     "cache-index.json",
@@ -241,6 +254,11 @@ export async function writeHotspotSnapshot(
   if (owner !== parsed.ownerId) throw new Error("热点快照 ownerId 未规范化");
   const filePath = ownerSnapshotPath(owner, parsed.id, options.storageRoot);
   if (!filePath) throw new Error("热点快照 ID 无效");
+  const db = researchSnapshotDatabase();
+  if (db) {
+    await writeCloudResearchSnapshot(db, "hotspots", parsed, options.configKey, options.retention ?? HOTSPOT_SNAPSHOT_RETENTION);
+    return parsed;
+  }
   await mkdir(path.dirname(filePath), { recursive: true });
 
   try {

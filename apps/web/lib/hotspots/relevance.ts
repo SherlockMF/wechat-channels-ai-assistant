@@ -71,7 +71,6 @@ export function selectRelevantHotspotItems(
         searchableText,
         options.customKeywords ?? [],
       );
-      if (matched.trackIds.length === 0 && customTerms.length === 0) continue;
 
       const parsed = entry.publishedAt ? Date.parse(entry.publishedAt) : Number.NaN;
       const hasDate = Number.isFinite(parsed);
@@ -121,7 +120,7 @@ export function selectRelevantHotspotItems(
   }
 
   const ordered = [...buckets.values()]
-    .sort((left, right) => right.timestamp - left.timestamp)
+    .sort((left, right) => Number(right.item.matchedTerms.length > 0) - Number(left.item.matchedTerms.length > 0) || right.timestamp - left.timestamp)
     .slice(0, options.maxItems ?? HOTSPOT_MAX_ITEMS);
 
   const sourceIdsByItem: Record<string, string[]> = {};

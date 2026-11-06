@@ -51,6 +51,8 @@ import {
   finalizeScriptOutput,
   sanitizeScriptInput,
 } from "@/lib/script-workbench/production-guide";
+import { resolveScriptResearchContext } from "@/lib/script-workbench/research-context";
+import { isViralResearchSnapshotExpired, readViralResearchSnapshot } from "@/lib/viral-research/cache";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
 import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
 import { loadUserSettings } from "@/lib/settings/store";
@@ -66,14 +68,6 @@ import {
   localSourcePaths,
   readLocalSourceFingerprint,
 } from "@/lib/data/local-source";
-import {
-  isHotspotSnapshotExpired,
-  readHotspotSnapshot,
-} from "@/lib/hotspots/cache";
-import {
-  isViralResearchSnapshotExpired,
-  readViralResearchSnapshot,
-} from "@/lib/viral-research/cache";
 
 const dataRoot = path.join(localSourcePaths().workspaceRoot, ".data");
 const databasePath = path.join(dataRoot, "local-state.json");
@@ -1361,12 +1355,16 @@ export class LocalRepository {
     ownerId: string,
     scriptId: string,
     patch: Partial<ScriptDraft>,
+    expectedPlainText?: string,
   ): Promise<ScriptDraft | null> {
     return mutate((state) => {
       const draft = (state.scriptDrafts ?? []).find(
         (item) => item.id === scriptId && item.ownerId === ownerId,
       );
       if (!draft) return null;
+      if (expectedPlainText !== undefined && (draft.editedPlainText ?? draft.output?.plainText ?? "") !== expectedPlainText) {
+        throw Object.assign(new Error("生成期间正文已变化，请按最新正文重新生成。"), { status: 409 });
+      }
       if (patch.input) {
         patch = { ...patch, input: sanitizeScriptInput(patch.input) };
       }
@@ -1429,32 +1427,6 @@ export class LocalRepository {
       input.idea,
     );
     const provider = resolveScriptProvider();
-    const storedResearchSnapshot = input.researchSnapshotId
-      ? await readViralResearchSnapshot(ownerId, input.researchSnapshotId)
-      : null;
-    const researchSnapshot =
-      storedResearchSnapshot &&
-      !isViralResearchSnapshotExpired(storedResearchSnapshot)
-        ? storedResearchSnapshot
-        : null;
-    const selectedIds = new Set(input.selectedResearchItemIds ?? []);
-    const storedHotspotSnapshot = input.hotspotSnapshotId
-      ? await readHotspotSnapshot(ownerId, input.hotspotSnapshotId)
-      : null;
-    const hotspotSnapshot =
-      storedHotspotSnapshot && !isHotspotSnapshotExpired(storedHotspotSnapshot)
-        ? storedHotspotSnapshot
-        : null;
-    const hotspotTopicCard =
-      hotspotSnapshot?.topicCards.find(
-        (card) => card.id === input.hotspotTopicCardId,
-      ) ?? null;
-    const hotspotCluster =
-      hotspotSnapshot?.clusters.find(
-        (cluster) =>
-          cluster.id === (hotspotTopicCard?.clusterId ?? input.hotspotClusterId),
-      ) ?? null;
-    const hotspotItemIds = new Set(hotspotCluster?.itemIds ?? []);
     const request = {
       format: params.format,
       topic,
@@ -1462,18 +1434,7 @@ export class LocalRepository {
       processKinds: params.processKinds ?? [],
       input,
       referenceHints: formatReferencesForPrompt(refs),
-      researchSnapshot,
-      selectedResearchItems:
-        researchSnapshot?.items.filter((item) => selectedIds.has(item.id)) ?? [],
-      selectedTopicCard:
-        researchSnapshot?.topicCards.find(
-          (item) => item.id === input.selectedTopicCardId,
-        ) ?? null,
-      hotspotSnapshot,
-      hotspotTopicCard,
-      hotspotItems:
-        hotspotSnapshot?.items.filter((item) => hotspotItemIds.has(item.id)) ??
-        [],
+      ...await resolveScriptResearchContext(ownerId, input),
       contentProfile: creationContext.accountProfileSnapshot,
       creatorContext: creationContext.creatorContextSnapshot,
     };

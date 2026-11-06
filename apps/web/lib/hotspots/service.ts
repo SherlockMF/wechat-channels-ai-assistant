@@ -180,7 +180,7 @@ export async function researchHotspots(
       ? `有 ${failedCount} 个来源这次没抓到内容，其余来源正常。`
       : "",
     items.length === 0
-      ? "这批来源里没有命中你的赛道，可以放宽时效或增加来源。"
+      ? "这批来源里没有时效内的可用条目，可以放宽时效或增加来源。"
       : "",
     topics.limitation ?? "",
   ]

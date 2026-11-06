@@ -684,7 +684,7 @@ export const hotspotSnapshotSchema = z.object({
   expiresAt: z.string(),
   sourceReports: z.array(hotspotSourceReportSchema).default([]),
   items: z.array(hotspotItemSchema).max(120),
-  clusters: z.array(hotspotClusterSchema).max(20),
+  clusters: z.array(hotspotClusterSchema).max(120),
   topicCards: z.array(hotspotTopicCardSchema).max(12),
   limitations: z.array(z.string()).max(4).default([]),
   degradedReason: z.string().nullable().optional(),
@@ -921,7 +921,13 @@ export const scriptReviewSchema = z.object({
 
 export const scriptDeliveryGuideSchema = z.object({
   version: z.literal(1),
+  source: z.enum(["ai", "rules"]).optional(),
+  model: z.string().max(200).optional(),
+  generatedAt: z.string().optional(),
+  documentHash: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   overallTone: z.string().max(200),
+  paceHint: z.string().max(300).optional(),
+  cameraNote: z.string().max(300).optional(),
   overallPace: z.enum(["slow", "normal", "fast"]),
   rehearsalNotes: z.array(z.string().max(300)).max(8),
   blocks: z.array(
@@ -946,6 +952,9 @@ export const scriptDeliveryGuideSchema = z.object({
             "reassuring",
           ]),
           intensity: z.number().int().min(1).max(3),
+          toneHint: z.string().max(300).optional(),
+          pauseHint: z.string().max(300).optional(),
+          expression: z.string().max(300).optional(),
           emphasis: z.array(z.string().max(100)).max(8),
           pauseAfter: z.enum(["none", "micro", "short", "medium", "long"]),
           breathBefore: z.boolean(),
@@ -1135,6 +1144,7 @@ export interface ScriptAccountProfileSnapshot {
 }
 
 export interface ScriptCreatorContextSnapshot {
+  topic?: { id: string; subject: string; note: string; source: string } | null;
   capturedAt: string;
   styleDigest: string;
   styleExcerpts: string[];
@@ -1174,6 +1184,7 @@ export interface ScriptDraft {
   promptVersion?: string | null;
   accountProfileSnapshot?: ScriptAccountProfileSnapshot | null;
   creatorContextSnapshot?: ScriptCreatorContextSnapshot | null;
+  rehearsalGuide?: ScriptDeliveryGuide | null;
   createdAt: string;
   updatedAt: string;
 }

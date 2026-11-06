@@ -415,16 +415,16 @@ describe("赛道过滤、去重与聚类", () => {
     ];
   }
 
-  it("丢弃不命中赛道的条目并记录 trackIds 与 matchedTerms", () => {
+  it("保留未命中关键词的候选交给模型判断，命中项仍有标记", () => {
     const { items } = selectRelevantHotspotItems(groupsFromFixtures(), {
       trackIds: ["smart_home", "water", "decoration", "appliance"],
       freshnessDays: 7,
       now: NOW,
     });
     const titles = items.map((item) => item.title);
-    expect(titles).not.toContain("某明星八卦引发全网热议");
-    expect(titles).not.toContain("本周股市收评");
-    expect(items).toHaveLength(6);
+    expect(titles).toContain("某明星八卦引发全网热议");
+    expect(titles).toContain("本周股市收评");
+    expect(items.length).toBeGreaterThan(6);
 
     const water = items.find((item) => item.title.includes("净水器"));
     expect(water?.trackIds).toEqual(["water"]);
@@ -435,15 +435,14 @@ describe("赛道过滤、去重与聚类", () => {
     expect(decoration?.trackIds).toEqual(["decoration"]);
   });
 
-  it("只保留命中所选赛道的条目", () => {
+  it("所选赛道只用于排序，不提前排除可跨领域解读的热点", () => {
     const { items } = selectRelevantHotspotItems(groupsFromFixtures(), {
       trackIds: ["water"],
       freshnessDays: 7,
       now: NOW,
     });
-    expect(items.map((item) => item.title)).toEqual([
-      "净水器新国标发布，直饮水质要求提高",
-    ]);
+    expect(items[0]?.title).toBe("净水器新国标发布，直饮水质要求提高");
+    expect(items.length).toBeGreaterThan(1);
   });
 
   it("自定义主题词可在没有内置赛道命中时保留条目", () => {
@@ -564,8 +563,8 @@ describe("赛道过滤、去重与聚类", () => {
       expect.arrayContaining(["smart_home", "appliance"]),
     );
 
-    expect(clusters.map((cluster) => cluster.heat)).toEqual([12, 8, 8, 6, 6]);
-    expect(clusters[3]?.headline).toContain("净水器");
+    expect(clusters.map((cluster) => cluster.heat)).toEqual([12, 8, 8, 6, 6, 6, 6]);
+    expect(clusters.find(cluster => cluster.headline.includes("净水器"))?.heat).toBe(6);
   });
 
   it("代表标题约束阻止 A≈B≈C 的单链误并", () => {
@@ -693,6 +692,19 @@ describe("选题卡生成", () => {
       "中控屏新品到底值不值得上",
     ]);
     expect(result.degradedReason).toContain("2 张选题卡因引用不存在的来源被丢弃");
+  });
+
+  it("本批无适合账号的选题是有效结果，不是模型失败", async () => {
+    const { clusters, items } = sampleClusters();
+    let prompt = "";
+    const result = await generateHotspotTopicCards({ clusters, items,
+      config: resolveHotspotRuntimeConfig({ sources: testSources }),
+      llmImpl: async ({ user }) => { prompt = user; return '{"cards":[]}'; },
+    });
+    expect(result.degradedReason).toBeUndefined();
+    expect(result.limitation).toContain("没有适合");
+    expect(prompt).toContain("不要强行关联");
+    expect(prompt).toContain('"cards":[]');
   });
 
   it("模型不可用时返回空卡片与一条人话说明，不抛错", async () => {
@@ -834,7 +846,7 @@ describe("热点服务编排", () => {
     expect(first.cacheHit).toBe(false);
     expect(first.stale).toBe(false);
     expect(first.snapshot.id).toMatch(/^hs-[a-f0-9]{16}-[a-f0-9]{24}$/u);
-    expect(first.snapshot.items).toHaveLength(6);
+    expect(first.snapshot.items).toHaveLength(8);
     expect(first.snapshot.clusters[0]?.sourceCount).toBe(2);
     expect(first.snapshot.topicCards).toEqual([]);
     expect(first.snapshot.limitations).toContain(

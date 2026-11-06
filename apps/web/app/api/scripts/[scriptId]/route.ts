@@ -6,7 +6,7 @@ import {
   scriptDraftStatusSchema,
 } from "@video-diagnosis/shared-types";
 import { repository, requestOwnerId } from "@/lib/data/repository";
-import { guideForCurrentText } from "@/lib/script-workbench/delivery-guide";
+import { guideForCurrentText, savedRehearsalGuide } from "@/lib/script-workbench/delivery-guide";
 
 export const runtime = "nodejs";
 
@@ -29,7 +29,8 @@ export async function GET(
   if (!draft) {
     return NextResponse.json({ error: "脚本不存在" }, { status: 404 });
   }
-  const rehearsalGuide = guideForCurrentText(draft.output, draft.editedPlainText ?? draft.output?.plainText ?? "");
+  const text = draft.editedPlainText ?? draft.output?.plainText ?? "";
+  const rehearsalGuide = savedRehearsalGuide(draft.rehearsalGuide, text) ?? guideForCurrentText(draft.output, text);
   return NextResponse.json({ draft, rehearsalGuide });
 }
 

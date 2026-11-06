@@ -1,3 +1,4 @@
+import { researchSnapshotDatabase, readCloudResearchSnapshot, latestCloudResearchSnapshotId, writeCloudResearchSnapshot } from "@/lib/data/research-snapshot-store";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -210,6 +211,13 @@ export async function readViralResearchSnapshot(
   const owner = normalizeOwnerId(ownerId);
   const filePath = ownerSnapshotPath(owner, snapshotId, options.storageRoot);
   if (!filePath) return null;
+  const db = researchSnapshotDatabase();
+  if (db) {
+    const raw = await readCloudResearchSnapshot(db, "viral", owner, snapshotId);
+    if (raw === null) return null;
+    const parsed = viralResearchSnapshotSchema.parse(raw);
+    return parsed.ownerId === owner ? parsed : null;
+  }
   try {
     const parsed = viralResearchSnapshotSchema.parse(
       JSON.parse(await readFile(filePath, "utf8")) as unknown,
@@ -237,6 +245,11 @@ export async function readCachedViralResearchSnapshot(
     freshnessDays: options.freshnessDays,
     contextFingerprint: options.contextFingerprint,
   });
+  const db = researchSnapshotDatabase();
+  if (db) {
+    const id = await latestCloudResearchSnapshotId(db, "viral", owner, queryKey);
+    return id ? readViralResearchSnapshot(owner, id, options) : null;
+  }
   return withIndexLock(indexPath, async () => {
     const index = await readIndex(indexPath);
     const entry = index.entries[queryKey];
@@ -306,6 +319,11 @@ export async function writeViralResearchSnapshot(
   }
   const filePath = ownerSnapshotPath(owner, parsed.id, options.storageRoot);
   if (!filePath) throw new Error("研究快照 ID 无效");
+  const db = researchSnapshotDatabase();
+  if (db) {
+    await writeCloudResearchSnapshot(db, "viral", parsed, options.cacheQuery && options.cacheModel ? viralResearchQueryKey(options.cacheQuery, options.cacheModel, { freshnessDays: options.cacheFreshnessDays, contextFingerprint: options.cacheContextFingerprint }) : undefined, VIRAL_RESEARCH_SNAPSHOT_RETENTION);
+    return parsed;
+  }
   await mkdir(path.dirname(filePath), { recursive: true });
 
   try {

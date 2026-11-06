@@ -1,7 +1,7 @@
 import type { ContentProfileSettings } from "@/lib/settings/schema";
 import type { ScriptCreatorContextSnapshot, ScriptDraft, ScriptDraftInput } from "@video-diagnosis/shared-types";
 import { normalizeContentProfile } from "@/lib/settings/content-profile";
-import { buildCreatorContext, loadStudio, markTopicWritten } from "@/lib/creator-studio/service";
+import { buildCreatorContext, markTopicWritten } from "@/lib/creator-studio/service";
 
 export function captureScriptContext(
   profile: Partial<ContentProfileSettings>,
@@ -26,14 +26,9 @@ export async function prepareScriptContext(
   input: ScriptDraftInput,
   profile: ContentProfileSettings,
 ) {
-  if (input.creatorTopicId) {
-    const state = await loadStudio(ownerId);
-    if (!state.topics.some((topic) => topic.id === input.creatorTopicId)) {
-      throw Object.assign(new Error("选题已删除或不属于当前账号，请重新选择"), { status: 404 });
-    }
-  }
   const context = await buildCreatorContext(ownerId, {
     topic: input.idea,
+    topicId: input.creatorTopicId,
     sectionId: input.creatorSectionId,
     sectionInputs: input.creatorSectionInputs,
   });

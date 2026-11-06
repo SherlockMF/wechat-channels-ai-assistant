@@ -127,6 +127,19 @@ describe("素材与栏目生成上下文", () => {
 });
 
 describe("选题池", () => {
+  it("备注召回素材并进入提示词，源修改后快照不变", async () => {
+    await applyStudioAction("alice", { action: "saveMaterial", title: "净水安装记录", body: "安装后检查接头", kind: "案例", tags: ["净水"] });
+    const state = await applyStudioAction("alice", { action: "saveTopic", subject: "今日观察", note: "净水安装案例；来源 https://example.com/news", source: "热点" });
+    const topic = state.topics[0]!;
+    const snapshot = await buildCreatorContext("alice", { topic: "今日观察", topicId: topic.id });
+    expect(snapshot.topic).toMatchObject({ subject: "今日观察", note: topic.note, source: "热点" });
+    expect(snapshot.materials).toHaveLength(1);
+    expect(creatorContextPrompt(snapshot)).toContain(topic.note);
+    await applyStudioAction("alice", { action: "saveTopic", ...topic, note: "后改备注" });
+    expect(snapshot.topic?.note).toBe(topic.note);
+    await expect(buildCreatorContext("bob", { topic: "今日观察", topicId: topic.id })).rejects.toThrow("选题");
+  });
+
   it("保存日期来源，生成成功才标记关联，允许恢复待写", async () => {
     let state = await applyStudioAction("alice", { action: "saveTopic", subject: "净水选购", source: "热点", planDate: "2026-11-10", status: "planned" });
     const topic = state.topics[0]!;

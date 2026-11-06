@@ -47,6 +47,7 @@ import {
   finalizeScriptOutput,
   sanitizeScriptInput,
 } from "@/lib/script-workbench/production-guide";
+import { resolveScriptResearchContext } from "@/lib/script-workbench/research-context";
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
 import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
 import { loadUserSettings } from "@/lib/settings/store";
@@ -773,6 +774,7 @@ export class CloudRepository {
     _ownerId: string,
     _scriptId: string,
     _patch: Partial<ScriptDraft>,
+    _expectedPlainText?: string,
   ): Promise<ScriptDraft | null> {
     this.scriptWorkbenchUnsupported();
   }
@@ -862,12 +864,16 @@ class SitesRepository extends CloudRepository {
     ownerId: string,
     scriptId: string,
     patch: Partial<ScriptDraft>,
+    expectedPlainText?: string,
   ): Promise<ScriptDraft | null> {
     return mutate((state) => {
       const draft = state.scriptDrafts.find(
         (item) => item.id === scriptId && item.ownerId === ownerId,
       );
       if (!draft) return null;
+      if (expectedPlainText !== undefined && (draft.editedPlainText ?? draft.output?.plainText ?? "") !== expectedPlainText) {
+        throw Object.assign(new Error("生成期间正文已变化，请按最新正文重新生成。"), { status: 409 });
+      }
       if (patch.input) {
         patch = { ...patch, input: sanitizeScriptInput(patch.input) };
       }
@@ -938,6 +944,7 @@ class SitesRepository extends CloudRepository {
       processKinds: params.processKinds ?? [],
       input,
       referenceHints: formatReferencesForPrompt(refs),
+      ...await resolveScriptResearchContext(ownerId, input),
       contentProfile: creationContext.accountProfileSnapshot,
       creatorContext: creationContext.creatorContextSnapshot,
     };
