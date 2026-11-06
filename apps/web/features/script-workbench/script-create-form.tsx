@@ -31,6 +31,8 @@ import {
 } from "@/lib/script-workbench/catalog";
 import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
 import { PLATFORM_CATALOG } from "@/lib/platforms/catalog";
+import Link from "next/link";
+import type { StudioState } from "@/lib/creator-studio/types";
 
 const TONE_OPTIONS = [
   { value: "casual", label: "口语" },
@@ -224,9 +226,11 @@ export interface HotspotSeed {
 export function ScriptCreateForm({
   researchSourceScriptId,
   hotspotSeed,
+  creatorTopicId: initialCreatorTopicId,
 }: {
   researchSourceScriptId?: string;
   hotspotSeed?: HotspotSeed;
+  creatorTopicId?: string;
 }) {
   const router = useRouter();
   const researchBranch = Boolean(researchSourceScriptId);
@@ -282,6 +286,38 @@ export function ScriptCreateForm({
   const [researchError, setResearchError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [studio, setStudio] = useState<StudioState | null>(null);
+  const [studioError, setStudioError] = useState("");
+  const [studioAttempt, setStudioAttempt] = useState(0);
+  const [creatorTopicId, setCreatorTopicId] = useState(initialCreatorTopicId ?? "");
+  const [creatorSectionId, setCreatorSectionId] = useState("");
+  const [creatorSectionInputs, setCreatorSectionInputs] = useState<Record<string, string>>({});
+  const selectedSection = studio?.sections.find((section) => section.id === creatorSectionId);
+  const selectedPoolTopic = studio?.topics.find((item) => item.id === creatorTopicId);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setStudioError("");
+    void fetch("/api/creator-studio", { signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "创作资料读取失败");
+        return body.state as StudioState;
+      })
+      .then((state) => {
+        if (controller.signal.aborted) return;
+        setStudio(state);
+        if (creatorTopicId) {
+          const selected = state.topics.find((item) => item.id === creatorTopicId);
+          if (!selected) throw new Error("该选题已删除，请返回选题池重新选择");
+          setIdea((current) => current.trim() ? current : selected.subject);
+        }
+      })
+      .catch((loadError) => {
+        if (!controller.signal.aborted) setStudioError(loadError instanceof Error ? loadError.message : "创作资料读取失败");
+      });
+    return () => controller.abort();
+  }, [creatorTopicId, studioAttempt]);
 
   const { format: resolvedFormat } = resolveFormat(format);
   const { topic: resolvedTopic } = resolveTopic(topic);
@@ -424,6 +460,9 @@ export function ScriptCreateForm({
         setContentGoal(input.contentGoal || "lead_generation");
         setCtaGoal(input.ctaGoal || "");
         setClaimEvidence(input.claimEvidence || "");
+        setCreatorSectionId(input.creatorSectionId || "");
+        setCreatorSectionInputs(input.creatorSectionInputs || {});
+        setCreatorTopicId(input.creatorTopicId || "");
         setRewriteMode("polish");
         setSourceReady(true);
       })
@@ -470,6 +509,19 @@ export function ScriptCreateForm({
 
   function validateCore() {
     setError("");
+    if (creatorTopicId && !selectedPoolTopic) {
+      setError(studioError || "正在读取选题池，请稍后再试");
+      return null;
+    }
+    if (creatorSectionId && !selectedSection) {
+      setError("栏目已删除或尚未载入，请重新选择栏目");
+      return null;
+    }
+    const missingField = selectedSection?.fields.find((field) => field.required && !creatorSectionInputs[field.id]?.trim());
+    if (missingField) {
+      setError(`请填写栏目素材：${missingField.label}`);
+      return null;
+    }
     if (!idea.trim()) {
       setError("请先写一句想法或今日安排");
       return null;
@@ -591,6 +643,11 @@ export function ScriptCreateForm({
         rewriteMode,
         targetPlatforms,
       };
+      if (creatorTopicId) input.creatorTopicId = creatorTopicId;
+      if (creatorSectionId) {
+        input.creatorSectionId = creatorSectionId;
+        input.creatorSectionInputs = creatorSectionInputs;
+      }
       if (targetPlatforms.includes("other") && platformOther.trim()) {
         input.platformOther = platformOther.trim();
       }
@@ -757,6 +814,49 @@ export function ScriptCreateForm({
             </span>
           </label>
         </Card>
+      ) : null}
+
+      {step !== 2 ? (
+      <Card className="space-y-4 p-5">
+        <div className="rounded-xl border border-line bg-[#f4f8f5] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-pine">本篇创作资料</p>
+            <Link href="/creator-studio" target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-pine underline underline-offset-4">管理语气、素材与栏目 ↗</Link>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-[#66736c]">
+            {studio?.styleDigest ? "已学习账号语气，将随本篇生成带入。" : "尚未学习账号语气，使用设置中的表达要求。"}
+            {studio?.materials.length ? ` 素材库 ${studio.materials.length} 条，将按本篇主题选择相关记录。` : " 可在创作资料中积累真实案例，减少重复填写。"}
+          </p>
+          {selectedPoolTopic ? (
+            <div className="mt-3 rounded-lg bg-white p-3 text-sm">
+              <p className="font-semibold">来自选题池：{selectedPoolTopic.subject}</p>
+              {selectedPoolTopic.note ? <p className="mt-1 whitespace-pre-wrap text-xs text-[#66736c]">{selectedPoolTopic.note}</p> : null}
+            </div>
+          ) : null}
+          {studioError ? <p role="alert" className="mt-2 text-sm text-coral">{studioError}</p> : null}
+          <div className="mt-3 flex items-end gap-3">
+            <label className="block flex-1 text-xs font-semibold text-[#52615a]">
+              内容栏目（可选）
+              <select value={creatorSectionId} onChange={(event) => { setCreatorSectionId(event.target.value); setCreatorSectionInputs({}); }} className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm">
+                <option value="">不使用栏目</option>
+                {studio?.sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+              </select>
+            </label>
+            <Button type="button" variant="secondary" onClick={() => setStudioAttempt((value) => value + 1)}>刷新资料</Button>
+          </div>
+          {selectedSection ? (
+            <div className="mt-3 space-y-3">
+              <p className="text-xs leading-5 text-[#66736c]">{selectedSection.purpose} {selectedSection.guide}</p>
+              {selectedSection.fields.map((field) => (
+                <label key={field.id} className="block text-xs font-semibold text-[#52615a]">
+                  {field.label}{field.required ? "（必填）" : "（选填）"}
+                  <textarea rows={3} maxLength={6000} value={creatorSectionInputs[field.id] ?? ""} onChange={(event) => setCreatorSectionInputs((current) => ({ ...current, [field.id]: event.target.value }))} placeholder="填写本次真实素材；没有的信息请留空，不编造。" className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm font-normal" />
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </Card>
       ) : null}
 
       {step === 1 ? (

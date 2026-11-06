@@ -75,6 +75,31 @@ export function HotspotWorkspace() {
   const [selectedClusterId, setSelectedClusterId] = useState("");
   const [trackFilter, setTrackFilter] = useState<TrackId | "all">("all");
   const [autoRefreshed, setAutoRefreshed] = useState(false);
+  const [savingTopic, setSavingTopic] = useState("");
+  const [savedTopics, setSavedTopics] = useState<string[]>([]);
+  const [topicMessage, setTopicMessage] = useState("");
+
+  async function saveTopic(card: HotspotTopicCard) {
+    if (!snapshot || savingTopic || savedTopics.includes(card.id)) return;
+    setSavingTopic(card.id);
+    setTopicMessage("");
+    try {
+      const links = snapshot.items.filter((item) => card.sourceIds.includes(item.id)).map((item) => item.url);
+      const response = await fetch("/api/creator-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "saveTopic", subject: card.title.slice(0, 180), note: [card.hook, card.whyNow, `热点快照：${snapshot.id}`, ...links].join("\n").slice(0, 3000), source: "热点", planDate: "", status: "idea" }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "收藏失败");
+      setSavedTopics((current) => [...current, card.id]);
+      setTopicMessage("已保存到选题池，可在创作资料中排期。");
+    } catch (saveError) {
+      setTopicMessage(saveError instanceof Error ? saveError.message : "收藏失败，请重试");
+    } finally {
+      setSavingTopic("");
+    }
+  }
 
   const applySnapshot = useCallback((next: HotspotSnapshot, nextStale: boolean) => {
     setSnapshot(next);
@@ -102,6 +127,7 @@ export function HotspotWorkspace() {
     return {
       snapshot: parsed?.success ? parsed.data : null,
       expired: Boolean(body.expired),
+      refreshDue: Boolean(body.refreshDue),
       stale: Boolean(body.stale),
     };
   }, []);
@@ -147,7 +173,7 @@ export function HotspotWorkspace() {
         if (latest.snapshot) {
           applySnapshot(latest.snapshot, latest.stale);
         }
-        if (!latest.snapshot || latest.expired) {
+        if (!latest.snapshot || latest.expired || latest.refreshDue) {
           setAutoRefreshed(true);
           await runRefresh(false);
         }
@@ -429,6 +455,7 @@ export function HotspotWorkspace() {
             {clusterCards.length ? (
               <Card className="space-y-3 p-4">
                 <h3 className="text-sm font-bold text-ink">选题建议</h3>
+                {topicMessage ? <p role="status" className="text-xs text-[#52615a]">{topicMessage} <Link href="/creator-studio" className="underline">查看选题池</Link></p> : null}
                 {clusterCards.map((card) => (
                   <div
                     key={card.id}
@@ -458,7 +485,7 @@ export function HotspotWorkspace() {
                         风险：{card.risks.join("、")}
                       </p>
                     ) : null}
-                    <div className="mt-3">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
@@ -469,6 +496,9 @@ export function HotspotWorkspace() {
                         }
                       >
                         用这条选题写脚本
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" disabled={Boolean(savingTopic) || savedTopics.includes(card.id)} onClick={() => void saveTopic(card)}>
+                        {savingTopic === card.id ? "收藏中…" : savedTopics.includes(card.id) ? "已收藏" : "收藏到选题池"}
                       </Button>
                     </div>
                   </div>

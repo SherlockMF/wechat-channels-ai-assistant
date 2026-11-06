@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   try {
     const ownerId = requestOwnerId(request);
     const [
-      { hotspotConfigKey, isHotspotSnapshotExpired, readLatestHotspotSnapshot },
+      { hotspotConfigKey, isHotspotSnapshotExpired, isHotspotRefreshDue, readLatestHotspotSnapshot },
       { resolveHotspotConfig },
       { resolveHotspotRuntimeConfig },
     ] = await Promise.all([
@@ -31,10 +31,11 @@ export async function GET(request: Request) {
       hotspotConfigKey(config),
     );
     const expired = snapshot ? isHotspotSnapshotExpired(snapshot) : false;
+    const refreshDue = snapshot ? isHotspotRefreshDue(snapshot) : false;
     // 没有快照也返回 200，由前端决定是否触发抓取，避免把「首次使用」当成错误。
     return NextResponse.json(
       // 本路由不抓取，stale 与 expired 同义，保留两个字段是为了和 POST 返回体对齐。
-      { snapshot, stale: expired, expired },
+      { snapshot, stale: expired, expired, refreshDue },
       { headers: privateResponse },
     );
   } catch {

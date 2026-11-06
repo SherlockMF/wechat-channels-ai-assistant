@@ -3,7 +3,7 @@ import { normalizeOwnerId } from "@/lib/data/owner";
 import {
   createHotspotSnapshotId,
   hotspotConfigKey,
-  isHotspotSnapshotExpired,
+  isHotspotRefreshDue,
   readLatestHotspotSnapshot,
   writeHotspotSnapshot,
 } from "@/lib/hotspots/cache";
@@ -76,7 +76,7 @@ export async function researchHotspots(
     configKey,
     storageOptions,
   ).catch(() => null);
-  if (!request.forceRefresh && previous && !isHotspotSnapshotExpired(previous, now)) {
+  if (!request.forceRefresh && previous && !isHotspotRefreshDue(previous, now)) {
     return { snapshot: previous, cacheHit: true, stale: false };
   }
 

@@ -595,6 +595,7 @@ export type ViralResearchSnapshot = z.infer<
 >;
 
 export const hotspotSourceKindSchema = z.enum([
+  "platform",
   "rss",
   "atom",
   "json_feed",
@@ -1020,6 +1021,11 @@ export const scriptDraftOutputLooseSchema = z.object({
 
 export const scriptDraftInputSchema = z.object({
   idea: z.string().min(1),
+  creatorSectionId: z.string().trim().min(1).max(128).optional(),
+  creatorSectionInputs: z.record(z.string().max(80), z.string().max(6000))
+    .refine((fields) => Object.keys(fields).length <= 20, "栏目字段不能超过 20 个")
+    .optional(),
+  creatorTopicId: z.string().trim().min(1).max(128).optional(),
   /** 已写好的口播/分镜稿；有则优先润色与配素材，少重写 */
   existingScript: z.string().optional(),
   /** 整片拍摄状态；缺省按未拍摄处理 */
@@ -1115,6 +1121,34 @@ export type ScriptDeliveryGuide = z.infer<typeof scriptDeliveryGuideSchema>;
 export type ScriptDraftInput = z.infer<typeof scriptDraftInputSchema>;
 export type ScriptDraftOutput = z.infer<typeof scriptDraftOutputSchema>;
 
+export interface ScriptAccountProfileSnapshot {
+  accountName: string;
+  brandName: string;
+  region: string;
+  positioning: string;
+  audiences: string[];
+  toneGuide: string;
+  ctaPolicy: string;
+  themeKeywords: string[];
+  defaultPlatforms: ContentPlatform[];
+  otherPlatformName: string;
+}
+
+export interface ScriptCreatorContextSnapshot {
+  capturedAt: string;
+  styleDigest: string;
+  styleExcerpts: string[];
+  materials: Array<{ id: string; title: string; kind: string; body: string }>;
+  section: {
+    id: string;
+    name: string;
+    purpose: string;
+    guide: string;
+    fields: Array<{ id: string; label: string; required: boolean }>;
+  } | null;
+  sectionInputs: Record<string, string>;
+}
+
 export interface ScriptDraft {
   id: string;
   ownerId: string;
@@ -1138,6 +1172,8 @@ export interface ScriptDraft {
   /** 再生成的父稿，便于追踪 lineage。 */
   parentScriptDraftId?: string | null;
   promptVersion?: string | null;
+  accountProfileSnapshot?: ScriptAccountProfileSnapshot | null;
+  creatorContextSnapshot?: ScriptCreatorContextSnapshot | null;
   createdAt: string;
   updatedAt: string;
 }

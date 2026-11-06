@@ -1,5 +1,5 @@
 import type { HotspotSourceKind, TrackId } from "@video-diagnosis/shared-types";
-import { DEFAULT_HOTSPOT_SOURCES } from "@/lib/hotspots/sources";
+import { DEFAULT_HOTSPOT_SOURCES, migrateLegacyHotspotSources } from "@/lib/hotspots/sources";
 import {
   HOTSPOT_DEFAULT_FRESHNESS_DAYS,
   HOTSPOT_DEFAULT_MAX_ITEMS_PER_SOURCE,
@@ -23,6 +23,7 @@ export const EDITABLE_HOTSPOT_SOURCE_KINDS = [
 ] as const satisfies readonly HotspotSourceKind[];
 
 export const HOTSPOT_SOURCE_KIND_LABELS: Record<HotspotSourceKind, string> = {
+  platform: "平台直连",
   rss: "RSS",
   atom: "Atom",
   json_feed: "JSON Feed",
@@ -31,6 +32,7 @@ export const HOTSPOT_SOURCE_KIND_LABELS: Record<HotspotSourceKind, string> = {
 };
 
 export function hotspotSourceUrlHint(kind: HotspotSourceKind): string {
+  if (kind === "platform") return "内置平台榜单接口，由专用解析器处理；无需 RSSHub 或 Docker";
   if (kind === "rsshub") {
     return "填 RSSHub 路由（如 /weibo/search/hot），运行时与上方 RSSHub 地址拼接";
   }
@@ -58,7 +60,7 @@ export function resolveEditableHotspotSources(
     return { sources: restoreDefaultHotspotSources(), usingDefaults: true };
   }
   return {
-    sources: sources.map((source) => ({ ...source })),
+    sources: migrateLegacyHotspotSources(sources),
     usingDefaults: false,
   };
 }

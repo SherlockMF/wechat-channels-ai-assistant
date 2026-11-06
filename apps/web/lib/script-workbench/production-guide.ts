@@ -8,6 +8,7 @@ import type {
   ScriptDraftProcessKind,
   ScriptDraftSmartSubTopic,
   ScriptDraftTopic,
+  ScriptCreatorContextSnapshot,
   ScriptProductionGuide,
   ViralResearchItem,
   ViralResearchSnapshot,
@@ -38,6 +39,7 @@ export interface ScriptGenerateRequest {
   hotspotItems?: HotspotItem[];
   /** 运行时账号画像；不写回稿件 input。 */
   contentProfile?: ContentProfileSettings;
+  creatorContext?: ScriptCreatorContextSnapshot;
 }
 
 const DEFAULT_EDIT_GUIDANCE = [

@@ -17,6 +17,7 @@ import {
   type HotspotUrlPolicy,
 } from "@/lib/hotspots/url-policy";
 import { clipResearchText } from "@/lib/viral-research/source-policy";
+import { parsePlatformBoard, platformRequest } from "@/lib/hotspots/platform-adapters";
 
 const FEED_ACCEPT_HEADER =
   "application/rss+xml, application/atom+xml, application/feed+json, application/xml;q=0.9, application/json;q=0.9, text/xml;q=0.8, */*;q=0.5";
@@ -259,6 +260,9 @@ function errorMessage(error: unknown): string {
     if (error.name === "AbortError" || error.name === "TimeoutError") {
       return "抓取超时";
     }
+    const cause = error.cause as { code?: unknown } | undefined;
+    const code = typeof cause?.code === "string" && /^[A-Z0-9_]{2,50}$/u.test(cause.code) ? cause.code : "";
+    if (code) return `网络请求失败（${code}）`;
     return clipResearchText(error.message, 160) ?? "抓取失败";
   }
   return "抓取失败";
@@ -281,6 +285,9 @@ async function fetchOneSource(
     Math.min(options.timeoutMs, options.remainingMs),
   );
   const signal = AbortSignal.timeout(timeoutMs);
+  const platform = source.config.kind === "platform" ? platformRequest(requestUrl) : undefined;
+  let method = platform?.method ?? "GET";
+  let body = platform?.body;
   let currentUrl = requestUrl;
   let response: Response | undefined;
 
@@ -304,8 +311,9 @@ async function fetchOneSource(
       }
     }
     response = await options.fetchImpl(check.url, {
-      method: "GET",
-      headers: { Accept: FEED_ACCEPT_HEADER },
+      method,
+      headers: { Accept: FEED_ACCEPT_HEADER, ...platform?.headers },
+      ...(body ? { body } : {}),
       redirect: "manual",
       signal,
     });
@@ -322,6 +330,10 @@ async function fetchOneSource(
     const location = response.headers.get("location");
     if (!location) throw new Error("重定向响应缺少 Location");
     response.body?.cancel().catch(() => {});
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+    }
     try {
       currentUrl = new URL(location, check.url).toString();
     } catch {
@@ -334,7 +346,7 @@ async function fetchOneSource(
   }
   const payload = await readCappedText(response, options.maxBytes);
   return sortAndClipEntries(
-    parseHotspotFeed(payload),
+    platform ? parsePlatformBoard(platform.id, payload) : parseHotspotFeed(payload),
     options.maxItemsPerSource,
   );
 }

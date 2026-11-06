@@ -5,8 +5,9 @@ import type {
   TrackId,
 } from "@video-diagnosis/shared-types";
 
-/** 热点快照有效期：热榜半天内变化有限，8 小时足够覆盖一天两次刷新。 */
+/** 历史快照在八小时内仍可用于创作引用。刷新榜单的间隔另行计算。 */
 export const HOTSPOT_CACHE_TTL_MS = 8 * 60 * 60 * 1000;
+export const HOTSPOT_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
 export const HOTSPOT_FETCH_CONCURRENCY = 4;
 export const HOTSPOT_SOURCE_TIMEOUT_MS = 8_000;
 export const HOTSPOT_SOURCE_MAX_BYTES = 2 * 1024 * 1024;

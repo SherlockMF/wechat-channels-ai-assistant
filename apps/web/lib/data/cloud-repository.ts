@@ -50,6 +50,7 @@ import {
 import { resolveScriptProvider } from "@/lib/script-workbench/provider";
 import { editedSpokenBody } from "@/lib/script-workbench/plain-text";
 import { loadUserSettings } from "@/lib/settings/store";
+import { prepareScriptContext, linkWrittenTopic, contextForRegeneration, type CapturedScriptContext } from "@/lib/script-workbench/creator-context";
 import {
   findScriptReferences,
   formatReferencesForPrompt,
@@ -909,6 +910,7 @@ class SitesRepository extends CloudRepository {
       input: ScriptDraftInput;
       title?: string | null;
       parentScriptDraftId?: string | null;
+      creationContext?: CapturedScriptContext;
     },
   ): Promise<ScriptDraft> {
     const topic =
@@ -920,6 +922,7 @@ class SitesRepository extends CloudRepository {
     }
     const input = sanitizeScriptInput(params.input);
     const settings = await loadUserSettings();
+    const creationContext = params.creationContext ?? await prepareScriptContext(ownerId, input, settings.contentProfile);
     const state = await readState();
     const refs = findScriptReferences(
       recordsOwnedBy(state.records, state.imports, ownerId),
@@ -935,7 +938,8 @@ class SitesRepository extends CloudRepository {
       processKinds: params.processKinds ?? [],
       input,
       referenceHints: formatReferencesForPrompt(refs),
-      contentProfile: settings.contentProfile,
+      contentProfile: creationContext.accountProfileSnapshot,
+      creatorContext: creationContext.creatorContextSnapshot,
     };
     let output = await provider.generate(request);
     output = finalizeScriptOutput(request, {
@@ -967,6 +971,7 @@ class SitesRepository extends CloudRepository {
       editedPlainText: null,
       parentScriptDraftId: params.parentScriptDraftId ?? null,
       promptVersion: "viral-v2",
+      ...creationContext,
       createdAt: now,
       updatedAt: now,
     };
@@ -974,7 +979,12 @@ class SitesRepository extends CloudRepository {
       params.title?.trim() ||
       resolveDraftListTitle(draft) ||
       ideaSummary;
-    return this.createScriptDraft(ownerId, draft);
+    const saved = await this.createScriptDraft(ownerId, draft);
+    const topicWarning = await linkWrittenTopic(saved);
+    if (topicWarning && saved.output) {
+      saved.output = { ...saved.output, gapsOrWarnings: [...saved.output.gapsOrWarnings, topicWarning] };
+    }
+    return saved;
   }
 
   async regenerateScriptDraft(ownerId: string, scriptId: string): Promise<ScriptDraft> {
@@ -995,6 +1005,7 @@ class SitesRepository extends CloudRepository {
       },
       title: existing.title,
       parentScriptDraftId: existing.id,
+      creationContext: contextForRegeneration(existing),
     });
   }
 

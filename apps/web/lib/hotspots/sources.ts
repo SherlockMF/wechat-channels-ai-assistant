@@ -17,21 +17,16 @@ import {
   normalizeHotspotKeywords,
 } from "@/lib/hotspots/types";
 import { allTrackIds } from "@/lib/tracks/dictionary";
+import { PLATFORM_HOTSPOT_SOURCES } from "@/lib/hotspots/platform-catalog";
 
 /** 内置默认源只保留实测可用项；站点改版后仍会由 sourceReports 单独报错。 */
 export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
+  ...PLATFORM_HOTSPOT_SOURCES,
   {
     id: "ithome",
     name: "IT之家",
     url: "https://www.ithome.com/rss/",
     kind: "rss",
-    enabled: true,
-  },
-  {
-    id: "36kr",
-    name: "36氪快讯（RSSHub）",
-    url: "/36kr/newsflashes",
-    kind: "rsshub",
     enabled: true,
   },
   {
@@ -48,28 +43,34 @@ export const DEFAULT_HOTSPOT_SOURCES: readonly HotspotSourceConfig[] = [
     kind: "rss",
     enabled: true,
   },
-  {
-    id: "rsshub-weibo-hot",
-    name: "微博热搜（TopHub）",
-    url: "/tophub/WnBe01o371",
-    kind: "rsshub",
-    enabled: true,
-  },
-  {
-    id: "rsshub-zhihu-hot",
-    name: "知乎热榜（RSSHub）",
-    url: "/zhihu/hot",
-    kind: "rsshub",
-    enabled: true,
-  },
-  {
-    id: "rsshub-douyin-hot",
-    name: "抖音总榜（TopHub）",
-    url: "/tophub/Y2KeDGQdNP",
-    kind: "rsshub",
-    enabled: true,
-  },
 ] as const;
+
+const LEGACY_PLATFORM_SOURCES: Record<string, { route: string; id: string; name: string }> = {
+  "36kr": { route: "/36kr/newsflashes", id: "36kr", name: "36氪快讯（RSSHub）" },
+  "rsshub-weibo-hot": { route: "/tophub/WnBe01o371", id: "weibo", name: "微博热搜（TopHub）" },
+  "rsshub-douyin-hot": { route: "/tophub/Y2KeDGQdNP", id: "douyin", name: "抖音总榜（TopHub）" },
+};
+
+/** 仅升级精确匹配的旧内置路由，不改用户自建的同名源。 */
+export function migrateLegacyHotspotSources(sources: readonly HotspotSourceConfig[]): HotspotSourceConfig[] {
+  const migrated = sources.map((source) => {
+    const legacy = LEGACY_PLATFORM_SOURCES[source.id];
+    if (legacy && source.kind === "rsshub" && source.url === legacy.route) {
+      const direct = PLATFORM_HOTSPOT_SOURCES.find((item) => item.id === legacy.id)!;
+      return { ...direct, name: source.name === legacy.name ? direct.name : source.name, enabled: source.enabled };
+    }
+    if (source.id === "rsshub-zhihu-hot" && source.kind === "rsshub" && source.url === "/zhihu/hot") {
+      return { ...source, name: "知乎热榜（旧来源已停用）", enabled: false };
+    }
+    return { ...source };
+  });
+  const seen = new Set<string>();
+  return migrated.filter((source) => {
+    if (seen.has(source.id)) return false;
+    seen.add(source.id);
+    return true;
+  });
+}
 
 export function defaultHotspotRuntimeConfig(): HotspotRuntimeConfig {
   return {
@@ -118,7 +119,7 @@ export function mergeHotspotSources(
     merged.push(parsed.data);
   }
   return merged.length
-    ? merged
+    ? migrateLegacyHotspotSources(merged)
     : DEFAULT_HOTSPOT_SOURCES.map((source) => ({ ...source }));
 }
 

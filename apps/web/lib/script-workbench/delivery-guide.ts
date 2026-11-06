@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { extractPrompterText } from "@/lib/script-workbench/editing";
+import { structuredSpokenBody } from "@/lib/script-workbench/plain-text";
 import type {
   ScriptDeliveryGuide,
   ScriptDraftOutput,
@@ -103,7 +105,12 @@ function emphasisWords(text: string): string[] {
 function fallbackSegments(sourceText: string): DeliverySegment[] {
   const chunks = sourceText
     .split(/(?<=[。！？!?；;\n])/u)
-    .filter((item) => item.length > 0);
+    .filter((item) => item.length > 0)
+    .reduce<string[]>((parts, item) => {
+      if (!item.trim() && parts.length) parts[parts.length - 1] += item;
+      else parts.push(item);
+      return parts;
+    }, []);
   return (chunks.length ? chunks : [sourceText]).map((text, index, all) => ({
     text,
     spokenAs: actualSpokenText(text),
@@ -185,7 +192,7 @@ export function ensureDeliveryGuide(output: ScriptDraftOutput): ScriptDraftOutpu
   });
   const warnings = [...(output.deliveryGuide?.warnings ?? [])];
   if (usedFallback && !warnings.some((item) => item.includes("中性攻略"))) {
-    warnings.push("模型未提供可对齐的逐段读法，已生成中性攻略；英文、型号和品牌读音请人工确认。");
+    warnings.push("本地规则生成的基础提示（中性攻略），并非 AI 个性化演绎；英文、型号和品牌读音请人工确认。");
   }
   return {
     ...output,
@@ -200,6 +207,19 @@ export function ensureDeliveryGuide(output: ScriptDraftOutput): ScriptDraftOutpu
       warnings: warnings.slice(0, 8),
     },
   };
+}
+
+/** Read-time compatibility for every historical/edited draft; never mutate its output. */
+export function guideForCurrentText(output: ScriptDraftOutput | null | undefined, text: string): ScriptDeliveryGuide | null {
+  const spoken = extractPrompterText(text);
+  if (!spoken) return null;
+  const normalizeLines = (value: string) => value.replace(/\r\n/g, "\n").replace(/\n+/g, "\n");
+  if (output && normalizeLines(spoken) === normalizeLines(structuredSpokenBody(output))) return ensureDeliveryGuide(output).deliveryGuide!;
+  const source: ScriptDraftOutput = {
+    pipeline: "koubo", script: spoken, plainText: text, titles: [], tags: [],
+    brollCues: [], subtitleBeats: [], altHooks: [], positioning: null, timeline: [], gapsOrWarnings: [],
+  };
+  return ensureDeliveryGuide(source).deliveryGuide!;
 }
 
 export function buildDeliveryGuidePromptContext(output: ScriptDraftOutput): string {

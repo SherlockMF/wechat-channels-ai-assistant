@@ -7,6 +7,7 @@ import {
 } from "@video-diagnosis/shared-types";
 import { normalizeOwnerId } from "@/lib/data/owner";
 import {
+  HOTSPOT_REFRESH_INTERVAL_MS,
   HOTSPOT_SNAPSHOT_RETENTION,
   type HotspotRuntimeConfig,
 } from "@/lib/hotspots/types";
@@ -14,7 +15,7 @@ import {
 const snapshotIdPattern = /^hs-[a-f0-9]{16}-[a-f0-9]{24}$/u;
 const indexLocks = new Map<string, Promise<void>>();
 /** 抓取与聚类口径变化时旧快照不该被复用。 */
-const HOTSPOT_POLICY_VERSION = 3;
+const HOTSPOT_POLICY_VERSION = 4;
 
 interface CacheIndex {
   version: 1;
@@ -155,6 +156,12 @@ export function isHotspotSnapshotExpired(
 ): boolean {
   const expiresAt = Date.parse(snapshot.expiresAt);
   return !Number.isFinite(expiresAt) || expiresAt <= now.getTime();
+}
+
+export function isHotspotRefreshDue(snapshot: HotspotSnapshot, now = new Date()): boolean {
+  const fetchedAt = Date.parse(snapshot.fetchedAt);
+  return !Number.isFinite(fetchedAt) || isHotspotSnapshotExpired(snapshot, now)
+    || now.getTime() - fetchedAt >= HOTSPOT_REFRESH_INTERVAL_MS;
 }
 
 export async function readHotspotSnapshot(

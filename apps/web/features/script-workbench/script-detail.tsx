@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Copy, Download, FileDown, RefreshCw } from "lucide-react";
 import type {
   ScriptDraft,
+  ScriptDeliveryGuide,
   ScriptDraftOutput,
   ViralResearchItem,
 } from "@video-diagnosis/shared-types";
@@ -17,6 +18,10 @@ import { resolveDraftListTitle } from "@/lib/script-workbench/display";
 import { exportMarkdownAsPdf } from "@/lib/reports/export-pdf";
 import { shouldShowViralPlan } from "@/lib/script-workbench/viral-plan";
 import { ScriptResearchPanel } from "@/features/script-workbench/script-research-panel";
+import { ScriptEditAssist } from "@/features/script-workbench/script-edit-assist";
+import { ScriptTeleprompter } from "@/features/script-workbench/script-teleprompter";
+import { useScriptAutosave } from "@/features/script-workbench/use-script-autosave";
+import { captureSelection, extractPrompterText, type ScriptSelection } from "@/lib/script-workbench/editing";
 
 const researchStatusLabel = {
   verified: "已完成可追溯检索",
@@ -58,8 +63,7 @@ const pauseLabel = {
   long: "长停",
 } as const;
 
-function deliveryGuideToText(output: ScriptDraftOutput): string {
-  const guide = output.deliveryGuide;
+function deliveryGuideToText(guide: ScriptDeliveryGuide | null): string {
   if (!guide) return "";
   const lines = [
     "【演讲攻略】",
@@ -104,28 +108,54 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-
-  async function load() {
-    const response = await fetch(`/api/scripts/${scriptId}`);
-    if (!response.ok) throw new Error("读取失败");
-    const body = await response.json();
-    setDraft(body.draft);
-    setPlainText(
-      body.draft.editedPlainText ?? body.draft.output?.plainText ?? "",
-    );
-  }
+  const [selection, setSelection] = useState<ScriptSelection | null>(null);
+  const [prompterOpen, setPrompterOpen] = useState(false);
+  const [learnPrompt, setLearnPrompt] = useState(false);
+  const [learning, setLearning] = useState(false);
+  const [rehearsal, setRehearsal] = useState<{ scriptId: string; text: string; guide: ScriptDeliveryGuide | null } | null>(null);
+  const [parentRehearsal, setParentRehearsal] = useState<ScriptDeliveryGuide | null>(null);
+  const [guideBusy, setGuideBusy] = useState(false);
+  const [guideError, setGuideError] = useState("");
+  const guideRequest = useRef<AbortController | null>(null);
+  const autosave = useScriptAutosave(
+    scriptId,
+    draft?.id === scriptId && draft.output ? (draft.editedPlainText ?? draft.output.plainText) : null,
+    plainText,
+    draft?.output?.plainText ?? "",
+    draft?.id === scriptId ? draft.ownerId : null,
+  );
 
   useEffect(() => {
-    void load()
-      .then(() => setError(""))
-      .catch((loadError) =>
-        setError(loadError instanceof Error ? loadError.message : "读取失败"),
-      )
-      .finally(() => setLoading(false));
+    const controller = new AbortController();
+    setLoading(true);
+    setDraft(null);
+    setSelection(null);
+    setPrompterOpen(false);
+    setLearnPrompt(false);
+    setMessage("");
+    setRehearsal(null);
+    setGuideError("");
+    setGuideBusy(false);
+    void fetch(`/api/scripts/${encodeURIComponent(scriptId)}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("读取失败");
+        const body = await response.json();
+        if (controller.signal.aborted) return;
+        setDraft(body.draft);
+        setPlainText(body.draft.editedPlainText ?? body.draft.output?.plainText ?? "");
+        setRehearsal({ scriptId, text: body.draft.editedPlainText ?? body.draft.output?.plainText ?? "", guide: body.rehearsalGuide ?? null });
+        setError("");
+      })
+      .catch((loadError) => {
+        if (!controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : "读取失败");
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => { controller.abort(); guideRequest.current?.abort(); };
   }, [scriptId]);
 
   useEffect(() => {
     const parentId = draft?.parentScriptDraftId;
+    setParentRehearsal(null);
     if (!parentId) {
       setParentDraft(null);
       setVersionView("optimized");
@@ -140,8 +170,9 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
         return response.json();
       })
       .then((body) => {
-        if (!body?.draft) return;
+        if (!body?.draft || controller.signal.aborted) return;
         setParentDraft(body.draft as ScriptDraft);
+        setParentRehearsal(body.rehearsalGuide ?? null);
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -178,29 +209,10 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
     }
     setBusy(true);
     setError("");
-    try {
-      const response = await fetch(`/api/scripts/${scriptId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          editedPlainText:
-            plainText === draft.output.plainText ? null : plainText,
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "保存失败");
-      setDraft(body.draft);
-      setPlainText(
-        body.draft.editedPlainText ?? body.draft.output?.plainText ?? "",
-      );
-      setMessage("已保存");
-      return true;
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存失败");
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    const ok = await autosave.flush();
+    if (ok) setMessage("已保存");
+    setBusy(false);
+    return ok;
   }
 
   async function researchAndOptimize() {
@@ -211,6 +223,7 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
   }
 
   async function regenerate() {
+    if (!(await autosave.flush())) return;
     setBusy(true);
     setError("");
     try {
@@ -229,6 +242,38 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
     }
   }
 
+  async function learnCurrentStyle() {
+    if (!draft) return;
+    const content = extractPrompterText(plainText);
+    if (content.trim().length < 100 || content.length > 20_000) {
+      setError("语气样本需要 100～20000 字口播正文；请先完善正文，或到创作资料页录入样本。");
+      return;
+    }
+    if (!(await autosave.flush())) return;
+    setLearning(true);
+    setError("");
+    let sampleSaved = false;
+    try {
+      const response = await fetch("/api/creator-studio", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "saveSample", title: resolveDraftListTitle(draft), content, draftId: draft.id }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "保存样本失败");
+      sampleSaved = true;
+      const learned = await fetch("/api/creator-studio", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "learnStyle" }),
+      });
+      const result = await learned.json();
+      if (!learned.ok) throw new Error(result.error || "学习失败");
+      setMessage("当前口播稿已加入语气样本，语气档案已更新。");
+      setLearnPrompt(false);
+    } catch (failure) {
+      setError(`${sampleSaved ? "样本已保存，学习未完成。可到创作资料页重新学习：" : ""}${failure instanceof Error ? failure.message : "学习失败"}`);
+      if (sampleSaved) setLearnPrompt(false);
+    } finally { setLearning(false); }
+  }
+
   async function copyAll() {
     try {
       await navigator.clipboard.writeText(displayPlainText);
@@ -239,14 +284,35 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
   }
 
   async function copyDeliveryGuide() {
-    if (!displayOutput) return;
-    const content = deliveryGuideToText(displayOutput);
+    const content = deliveryGuideToText(displayGuide);
     if (!content) return;
     try {
       await navigator.clipboard.writeText(content);
       setMessage("已复制演讲攻略");
     } catch {
       setError("攻略复制失败，请手动选择复制");
+    }
+  }
+
+  async function updateDeliveryGuide() {
+    const submitted = plainText;
+    guideRequest.current?.abort();
+    const controller = new AbortController();
+    guideRequest.current = controller;
+    setGuideBusy(true);
+    setGuideError("");
+    try {
+      const response = await fetch(`/api/scripts/${encodeURIComponent(scriptId)}/delivery-guide`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: submitted }), signal: controller.signal,
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "生成口播提示失败");
+      if (!controller.signal.aborted) setRehearsal({ scriptId, text: submitted, guide: body.guide });
+    } catch (failure) {
+      if (!controller.signal.aborted) setGuideError(failure instanceof Error ? failure.message : "生成口播提示失败");
+    } finally {
+      if (guideRequest.current === controller && !controller.signal.aborted) setGuideBusy(false);
     }
   }
 
@@ -318,6 +384,8 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
       ""
     : plainText;
   const canCompareVersions = Boolean(parentDraft?.output);
+  const displayGuide = showingOriginal ? parentRehearsal
+    : rehearsal?.scriptId === scriptId && rehearsal.text === plainText ? rehearsal.guide : null;
   const reviewInput = showingOriginal ? parentDraft?.input : draft.input;
   const hasOriginalScript = Boolean(reviewInput?.existingScript?.trim());
   const showViralPlan = shouldShowViralPlan(displayOutput?.viralPlan);
@@ -438,11 +506,14 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
           <Button
             size="sm"
             variant="secondary"
-            disabled={busy || showingOriginal}
+            disabled={busy || showingOriginal || Boolean(autosave.recovery)}
             onClick={() => void save()}
           >
             保存修改
           </Button>
+          <Button size="sm" variant="secondary" disabled={!extractPrompterText(displayPlainText)} onClick={() => setPrompterOpen(true)}>提词排练</Button>
+            <Button size="sm" variant="secondary" onClick={() => document.getElementById("delivery-guide")?.scrollIntoView({ behavior: "smooth", block: "start" })}>口播语气／演讲提示</Button>
+          <Button size="sm" variant="secondary" disabled={showingOriginal || learning || Boolean(autosave.recovery)} onClick={() => setLearnPrompt((open) => !open)}>学这篇的语气</Button>
           <Button
             size="sm"
             variant="secondary"
@@ -471,6 +542,29 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
             </Button>
           </Link>
         </div>
+        <p role="status" aria-live="polite" className={`text-xs ${autosave.status === "error" ? "text-coral" : "text-[#66736c]"}`}>
+          {autosave.status === "saved" ? "修改已保存" : autosave.status === "saving" ? "正在保存…" : autosave.status === "error" ? `保存失败：${autosave.error}。正文仍在编辑框中，请点击“保存修改”重试。` : "有未保存修改，将自动保存"}
+        </p>
+        {autosave.recovery ? <div role="alert" className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">发现这篇稿件未保存的浏览器副本</p>
+          <p>修改于 {new Date(autosave.recovery.updatedAt).toLocaleString("zh-CN")}。请先选择恢复或放弃，避免覆盖尚未保存的文字。</p>
+          {autosave.recovery.baseText !== (draft.editedPlainText ?? draft.output?.plainText ?? "") ? <p>服务器正文也发生过变化，恢复前请对照副本。</p> : null}
+          <details><summary className="cursor-pointer font-semibold">查看恢复副本</summary><p className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs leading-6">{autosave.recovery.text}</p></details>
+          <div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => { const text = autosave.restoreRecovery(); if (text !== null) { setPlainText(text); setSelection(null); setMessage("已恢复浏览器里的修改，将重新保存。"); } }}>恢复修改</Button><Button size="sm" variant="secondary" onClick={() => autosave.discardRecovery()}>放弃副本，保留服务器版本</Button></div>
+        </div> : null}
+        {autosave.recoveryStorageError ? <p role="alert" className="text-xs text-coral">{autosave.recoveryStorageError}</p> : null}
+        {learnPrompt ? <div className="space-y-3 rounded-xl border border-line bg-[#f4f7f5] p-4">
+          <p className="text-sm">将当前口播正文加入已确认的语气样本，并调用模型提炼表达习惯。只学习语气，今后不会把这篇里的案例当成新稿事实。</p>
+          <div className="flex gap-2"><Button size="sm" disabled={learning} onClick={() => void learnCurrentStyle()}>{learning ? "正在学习…" : "确认加入并学习"}</Button><Button size="sm" variant="ghost" disabled={learning} onClick={() => setLearnPrompt(false)}>取消</Button></div>
+        </div> : null}
+        {draft.accountProfileSnapshot || draft.creatorContextSnapshot ? <details className="rounded-xl border border-line px-4 py-3 text-sm">
+          <summary className="cursor-pointer font-semibold text-[#52615a]">查看生成时的账号与素材依据</summary>
+          <div className="mt-3 space-y-2 text-[#66736c]">
+            {draft.accountProfileSnapshot ? <><p>账号：{draft.accountProfileSnapshot.accountName}</p><p>定位：{draft.accountProfileSnapshot.positioning}</p><p>表达要求：{draft.accountProfileSnapshot.toneGuide}</p></> : null}
+            {draft.creatorContextSnapshot ? <><p>资料捕获：{new Date(draft.creatorContextSnapshot.capturedAt).toLocaleString("zh-CN")}</p><p>{draft.creatorContextSnapshot.styleDigest ? "已采用确认样本的语气档案" : "当时未使用语气学习档案"}</p>{draft.creatorContextSnapshot.section ? <p>栏目：{draft.creatorContextSnapshot.section.name}</p> : null}<p>引用素材：{draft.creatorContextSnapshot.materials.map((material) => material.title).join("、") || "无"}</p></> : null}
+            <p className="text-xs">这是本稿的生成快照，修改账号设置或素材库不会改变这份记录。</p>
+          </div>
+        </details> : null}
         {message ? <p className="text-xs text-pine">{message}</p> : null}
         {error ? <p className="text-xs text-coral">{error}</p> : null}
       </Card>
@@ -550,35 +644,42 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
         </Card>
       ) : null}
 
-      {displayOutput?.deliveryGuide ? (
         <Card className="space-y-5 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="font-semibold">排练与演讲攻略</h3>
+              <h3 id="delivery-guide" className="scroll-mt-6 font-semibold">口播语气／演讲提示</h3>
+              <p className="mt-1 text-xs text-[#66736c]">排练与演讲攻略 · 逐句语气、重读、停顿、换气与动作</p>
+              {displayGuide ? (
               <p className="mt-1 text-sm text-[#66736c]">
-                {displayOutput.deliveryGuide.overallTone} · 整体语速
-                {paceLabel[displayOutput.deliveryGuide.overallPace]}
+                {displayGuide.overallTone} · 整体语速
+                {paceLabel[displayGuide.overallPace]}
               </p>
+              ) : null}
             </div>
-            <Button size="sm" variant="secondary" onClick={() => void copyDeliveryGuide()}>
+            <div className="flex flex-wrap gap-2">
+            {!showingOriginal ? <Button size="sm" variant="secondary" disabled={guideBusy || Boolean(autosave.recovery) || !extractPrompterText(displayPlainText)} onClick={() => void updateDeliveryGuide()}>{guideBusy ? "正在生成提示…" : "按当前口播更新提示"}</Button> : null}
+            <Button size="sm" variant="secondary" disabled={!displayGuide} onClick={() => void copyDeliveryGuide()}>
               <Copy size={14} />
               单独复制攻略
             </Button>
+            </div>
           </div>
-          {textDiverged && !showingOriginal ? (
+          {guideError ? <p role="alert" className="text-sm text-coral">{guideError}</p> : null}
+          {!displayGuide ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              全文已手工修改；以下攻略仍绑定生成时的结构化口播，请按当前全文重新核对。
+              {extractPrompterText(displayPlainText) ? "当前正文尚无匹配提示，或改稿后提示已过期。点击“按当前口播更新提示”即可补齐；生成基础提示不会调用 AI 或改写正文。" : "当前没有可排练的口播正文，请先填写口播稿。"}
             </p>
           ) : null}
-          {displayOutput.deliveryGuide.rehearsalNotes.length ? (
+          {displayGuide ? <>
+          {displayGuide.rehearsalNotes.length ? (
             <ul className="list-disc space-y-1 pl-5 text-sm text-[#52615a]">
-              {displayOutput.deliveryGuide.rehearsalNotes.map((item, index) => (
+              {displayGuide.rehearsalNotes.map((item, index) => (
                 <li key={`${index}-${item}`}>{item}</li>
               ))}
             </ul>
           ) : null}
           <div className="space-y-4">
-            {displayOutput.deliveryGuide.blocks.map((block, blockIndex) => (
+            {displayGuide.blocks.map((block, blockIndex) => (
               <section
                 key={`${block.kind}-${block.order ?? blockIndex}-${block.sourceHash}`}
                 className="space-y-3 rounded-xl border border-line p-4"
@@ -624,13 +725,13 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
               </section>
             ))}
           </div>
-          {displayOutput.deliveryGuide.warnings.length ? (
+          {displayGuide.warnings.length ? (
             <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
-              {displayOutput.deliveryGuide.warnings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+              {displayGuide.warnings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
             </ul>
           ) : null}
+          </> : null}
         </Card>
-      ) : null}
 
       {showViralPlan && displayOutput?.viralPlan ? (
         <Card className="space-y-5 p-5">
@@ -978,12 +1079,23 @@ export function ScriptDetail({ scriptId }: { scriptId: string }) {
           ) : null}
         </h3>
         <textarea
+          aria-label="可编辑全文"
           className="min-h-64 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm leading-6"
           value={displayPlainText}
-          readOnly={showingOriginal}
+          maxLength={200_000}
+          readOnly={showingOriginal || Boolean(autosave.recovery)}
           onChange={(event) => setPlainText(event.target.value)}
+          onSelect={(event) => {
+            if (showingOriginal) return;
+            const element = event.currentTarget;
+            try { setSelection(captureSelection(element.value, element.selectionStart, element.selectionEnd)); }
+            catch { setSelection(null); }
+          }}
         />
+        {!showingOriginal && !autosave.recovery ? <ScriptEditAssist key={scriptId} scriptId={scriptId} text={plainText} selection={selection} onApply={(next) => { setPlainText(next); setSelection(null); setMessage("已应用改写建议，将自动保存。"); }} /> : null}
       </Card>
+
+      {prompterOpen ? <ScriptTeleprompter text={extractPrompterText(displayPlainText)} guide={displayGuide ?? undefined} onClose={() => setPrompterOpen(false)} /> : null}
 
       {researchPanelMounted ? (
         <ScriptResearchPanel

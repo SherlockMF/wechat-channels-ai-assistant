@@ -12,6 +12,7 @@ export default async function NewScriptPage({
     hotspotCard?: string;
     hotspotTitle?: string;
     idea?: string;
+    creatorTopicId?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -54,6 +55,7 @@ export default async function NewScriptPage({
       <ScriptCreateForm
         researchSourceScriptId={researchSourceScriptId}
         hotspotSeed={hotspotSeed}
+        creatorTopicId={params.creatorTopicId?.trim() || undefined}
       />
     </>
   );

@@ -53,8 +53,7 @@ export function HotspotSection({
       },
     });
 
-  const baseSources = () =>
-    hotspots.sources.length ? hotspots.sources : restoreDefaultHotspotSources();
+  const baseSources = () => displaySources;
 
   const mutateSources = (
     mutator: (
@@ -70,8 +69,8 @@ export function HotspotSection({
         <div>
           <h3 className="text-sm font-bold text-ink">研究热点</h3>
           <p className="mt-1 text-xs leading-5 text-[#78857e]">
-            从多个新闻源与热榜抓取近期条目，按赛道过滤后给出选题建议。官方 RSS
-            可直接读取；36氪、微博、知乎、抖音等 RSSHub 来源需要配置可用的服务地址。
+            直接抓取微博、百度、抖音、头条、36氪和 B站榜单，结合三个 RSS 新闻源生成选题。
+            默认来源无需 RSSHub 或 Docker。
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -87,27 +86,30 @@ export function HotspotSection({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <label className="block space-y-1.5 md:col-span-2">
-          <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
-            RSSHub 地址
-          </span>
-          <input
-            className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
-            value={hotspots.rsshubBaseUrl}
-            onChange={(event) =>
-              updateHotspots({ rsshubBaseUrl: event.target.value })
-            }
-            placeholder="http://127.0.0.1:1200"
-            autoComplete="off"
-          />
-          {rsshubHint ? (
-            <span className="text-xs text-coral">{rsshubHint}</span>
-          ) : (
-            <span className="text-xs text-[#78857e]">
-              填写可用的 RSSHub 地址；留空时使用环境配置，未配置则跳过相关来源
-            </span>
-          )}
-        </label>
+        {displaySources.some((source) => source.kind === "rsshub") ? (
+          <details className="md:col-span-2">
+            <summary className="cursor-pointer text-xs text-[#78857e]">
+              旧版自定义 RSSHub 来源设置
+            </summary>
+            <label className="mt-2 block space-y-1.5">
+              <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">RSSHub 地址</span>
+              <input
+                className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-pine"
+                value={hotspots.rsshubBaseUrl}
+                onChange={(event) => updateHotspots({ rsshubBaseUrl: event.target.value })}
+                placeholder="http://127.0.0.1:1200"
+                autoComplete="off"
+              />
+              {rsshubHint ? (
+                <span className="text-xs text-coral">{rsshubHint}</span>
+              ) : (
+                <span className="text-xs text-[#78857e]">
+                  仅兼容此前添加的自定义来源；默认热榜不使用此服务。
+                </span>
+              )}
+            </label>
+          </details>
+        ) : null}
 
         <label className="block space-y-1.5">
           <span className="text-xs font-bold uppercase tracking-wide text-[#78857e]">
@@ -303,6 +305,7 @@ export function HotspotSection({
               <input
                 className="h-9 rounded-lg border border-line px-2 text-sm outline-none focus:border-pine"
                 value={source.url}
+                readOnly={source.kind === "platform"}
                 onChange={(event) =>
                   mutateSources((current) =>
                     updateHotspotSource(current, source.id, {
@@ -312,8 +315,8 @@ export function HotspotSection({
                 }
                 placeholder={hotspotSourceUrlPlaceholder(source.kind)}
               />
-              {source.kind === "dashscope" ? (
-                <Badge tone="neutral">{HOTSPOT_SOURCE_KIND_LABELS.dashscope}</Badge>
+              {source.kind === "dashscope" || source.kind === "platform" ? (
+                <Badge tone="neutral">{HOTSPOT_SOURCE_KIND_LABELS[source.kind]}</Badge>
               ) : (
                 <select
                   className="h-9 rounded-lg border border-line bg-white px-2 text-sm outline-none focus:border-pine"

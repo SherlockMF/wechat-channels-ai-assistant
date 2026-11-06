@@ -803,16 +803,16 @@ describe("源清单与 RSSHub", () => {
 
   it("空源清单回落到内置默认清单", () => {
     const config = resolveHotspotRuntimeConfig({ sources: [] });
-    expect(config.sources).toHaveLength(7);
+    expect(config.sources).toHaveLength(9);
     expect(config.sources.some((source) => source.id === "ithome")).toBe(true);
     expect(config.sources.some((source) => source.id === "36kr")).toBe(true);
-    expect(config.sources.some((source) => source.id === "rsshub-zhihu-hot")).toBe(true);
+    expect(config.sources.some((source) => source.kind === "rsshub")).toBe(false);
     expect(
-      config.sources.find((source) => source.id === "rsshub-weibo-hot")?.url,
-    ).toBe("/tophub/WnBe01o371");
+      config.sources.find((source) => source.id === "weibo")?.url,
+    ).toBe("https://weibo.com/ajax/side/hotSearch");
     expect(
-      config.sources.find((source) => source.id === "rsshub-douyin-hot")?.url,
-    ).toBe("/tophub/Y2KeDGQdNP");
+      config.sources.find((source) => source.id === "douyin")?.url,
+    ).toBe("https://www.iesdouyin.com/web/api/v2/hotsearch/billboard/word/");
   });
 });
 
@@ -859,14 +859,22 @@ describe("热点服务编排", () => {
         config: noLlmConfig(),
         fetchImpl,
         storageRoot: tempDir,
-        now: () => new Date(NOW.getTime() + 7 * 60 * 60 * 1000),
+        now: () => new Date(NOW.getTime() + 10 * 60 * 1000),
       },
     );
     expect(second.cacheHit).toBe(true);
+    expect(first.snapshot.expiresAt).toBe(new Date(NOW.getTime() + 8 * 60 * 60 * 1000).toISOString());
     expect(second.snapshot.id).toBe(first.snapshot.id);
     expect(
       (fetchImpl as unknown as { mock: { calls: unknown[] } }).mock.calls.length,
     ).toBe(requestCount);
+    const refreshed = await researchHotspots("owner-a", {}, {
+      config: noLlmConfig(), fetchImpl, storageRoot: tempDir,
+      now: () => new Date(NOW.getTime() + 30 * 60 * 1000),
+    });
+    expect(refreshed.cacheHit).toBe(false);
+    expect(refreshed.snapshot.id).not.toBe(first.snapshot.id);
+    expect(isHotspotSnapshotExpired(first.snapshot, new Date(NOW.getTime() + 30 * 60 * 1000))).toBe(false);
   });
 
   it("快照过期后全部来源失败时返回上一份快照并标记 stale", async () => {

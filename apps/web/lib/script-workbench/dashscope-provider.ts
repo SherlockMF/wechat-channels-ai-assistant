@@ -36,6 +36,7 @@ import {
   resolveLlmModel,
 } from "@/lib/settings/credentials";
 import { normalizeContentProfile } from "@/lib/settings/content-profile";
+import { creatorContextPrompt } from "@/lib/creator-studio/service";
 import {
   platformLabel,
   platformPromptGuidance,
@@ -306,6 +307,7 @@ export function buildScriptGenerationPrompt(request: ScriptGenerateRequest): str
     "你是多平台短视频主编。先用证据约束创意，再产出符合账号画像、可拍、可剪、可验证的脚本。",
     `Prompt 版本：${SCRIPT_PROMPT_VERSION}`,
     accountAndPlatformContext(request),
+    request.creatorContext ? creatorContextPrompt(request.creatorContext) : "",
     `制作形态：${formatLabel(request.format, request.input.formatOther)}`,
     `业务主题：${topicLabel(request.topic, request.input.topicOther)}`,
     request.subTopics.length
@@ -377,6 +379,7 @@ export function buildScriptQualityPrompt(
     `实际研究状态必须是 ${resolveResearchStatus(request)}；sourceIds 只能是：${(request.selectedResearchItems ?? []).map((item) => item.id).join("、") || "空数组"}。`,
     `CTA 目标：${request.input.ctaGoal?.trim() || "未指定"}；用户证据：${request.input.claimEvidence?.trim() || "未提供"}。`,
     accountAndPlatformContext(request),
+    request.creatorContext ? creatorContextPrompt(request.creatorContext) : "",
     buildDeliveryGuidePromptContext(candidate),
     "deliveryGuide 必须逐块绑定上述最终口播，segments.text 按原文顺序切分；不要把攻略写入 plainText。",
     schemaHint(isKouboFormat(request.format)),

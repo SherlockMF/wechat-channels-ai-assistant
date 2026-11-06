@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  BookOpen,
   Clapperboard,
   Database,
   FileSpreadsheet,
@@ -24,6 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navigation = [
     { href: "/scripts", label: "脚本工作台", icon: ScrollText },
     { href: "/hotspots", label: "研究热点", icon: Flame },
+    { href: "/creator-studio", label: "创作资料", icon: BookOpen },
     { href: "/review", label: "发布前审片", icon: Clapperboard },
     sitesMode
       ? { href: "/imports/new", label: "数据匹配", icon: FileSpreadsheet }
@@ -53,7 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </span>
           </Link>
-          <nav className="order-3 flex w-full items-center justify-center gap-1 rounded-xl border border-line bg-white p-1 md:order-none md:w-auto">
+          <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1 xl:order-none xl:w-auto">
             {navigation.map((item) => {
               const Icon = item.icon;
               const active =
@@ -71,7 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition",
+                    "flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition",
                     active
                       ? "bg-[#e9f0eb] text-pine"
                       : "text-[#66736c] hover:bg-fog",

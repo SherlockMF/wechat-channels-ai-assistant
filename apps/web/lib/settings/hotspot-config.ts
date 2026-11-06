@@ -6,6 +6,7 @@ import {
 import type { HotspotsProviderSettings, UserSettings } from "@/lib/settings/schema";
 import { normalizeContentProfile } from "@/lib/settings/content-profile";
 import { allTrackIds, trackLabel } from "@/lib/tracks/dictionary";
+import { migrateLegacyHotspotSources } from "@/lib/hotspots/sources";
 
 /** RSSHub 通常自建在本机或内网，因此这里允许 http 与自定义端口。 */
 export function normalizeRsshubBaseUrl(value: string): string {
@@ -48,7 +49,7 @@ export function normalizeHotspotBlock(
         ? []
         : allTrackIds(),
     customKeywords,
-    sources,
+    sources: migrateLegacyHotspotSources(sources),
     topicModel: hotspots.topicModel.trim(),
   };
 }
@@ -127,7 +128,5 @@ export function describeHotspotConfig(settings: UserSettings): string {
   const custom = hotspots.customKeywords.length
     ? `；主题词：${hotspots.customKeywords.slice(0, 4).join("、")}`
     : "";
-  return `已就绪（源 ${sourceCount}；近 ${hotspots.freshnessDays} 天；赛道：${tracks}${custom}${
-    hotspots.rsshubBaseUrl ? "；已配置 RSSHub" : "；未配置 RSSHub"
-  }）`;
+  return `已就绪（源 ${sourceCount}；近 ${hotspots.freshnessDays} 天；赛道：${tracks}${custom}）`;
 }
